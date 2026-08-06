@@ -1,0 +1,65 @@
+name: publish-nodejs
+
+# Publishes nodejs/ to npm when a tag like `nodejs-v1.0.0` is pushed.
+# The tag prefix keeps this from firing for SDKs in other languages.
+
+on:
+  push:
+    tags: ['nodejs-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm trusted publishing and provenance
+
+defaults:
+  run:
+    working-directory: nodejs
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: create an environment of this name in repo settings to require
+    # a manual approval before anything reaches npm. Delete if not wanted.
+    environment: npm-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: nodejs/package-lock.json
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - name: Use a recent npm
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - name: Fail if the tag and package.json disagree
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#nodejs-v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag says $TAG_VERSION but package.json says $PKG_VERSION."
+            exit 1
+          fi
+        if: github.event_name == 'push'
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run examples:smoke
+
+      # Trusted publishing: no secret needed once the repo is registered as a
+      # trusted publisher for this package on npmjs.com.
+      #
+      # To use a granular access token instead, add an NPM_TOKEN repo secret and
+      # append to this step:
+      #   env:
+      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm
+        run: npm publish --provenance --access public
