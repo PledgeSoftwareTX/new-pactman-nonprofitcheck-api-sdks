@@ -54,12 +54,14 @@ jobs:
       - run: npm run build
       - run: npm run examples:smoke
 
-      # Trusted publishing: no secret needed once the repo is registered as a
-      # trusted publisher for this package on npmjs.com.
+      # Authenticates with the NPM_TOKEN repo secret. The token must be a
+      # granular access token with read+write on this package and "bypass 2FA"
+      # enabled, or npm rejects the publish under an auth-and-writes 2FA policy.
       #
-      # To use a granular access token instead, add an NPM_TOKEN repo secret and
-      # append to this step:
-      #   env:
-      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # To switch to trusted publishing later, register this repo and workflow
+      # as a trusted publisher on npmjs.com, then delete the env block below —
+      # OIDC needs no secret and is not subject to the 2FA requirement.
       - name: Publish to npm
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
