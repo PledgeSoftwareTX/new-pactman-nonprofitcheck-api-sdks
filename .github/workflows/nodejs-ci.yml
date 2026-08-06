@@ -3,9 +3,10 @@ name: nodejs-sdk
 on:
   push:
     branches: [master]
-    paths: ['nodejs/**', '.github/workflows/ci.yml']
+    paths: ['nodejs/**', '.github/workflows/nodejs-ci.yml']
   pull_request:
-    paths: ['nodejs/**', '.github/workflows/ci.yml']
+    paths: ['nodejs/**', '.github/workflows/nodejs-ci.yml']
+  workflow_dispatch:
 
 defaults:
   run:
