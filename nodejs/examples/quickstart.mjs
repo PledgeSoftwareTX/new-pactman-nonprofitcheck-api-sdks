@@ -22,7 +22,7 @@ const client = new PactmanClient({
   timeoutMs: 15_000,
 });
 
-const ein = process.argv[2] ?? '68-0343125';
+const ein = process.argv[2] ?? '41-1787097';
 const result = await client.nonprofits.check(ein);
 
 if (!result.nonprofit) {
