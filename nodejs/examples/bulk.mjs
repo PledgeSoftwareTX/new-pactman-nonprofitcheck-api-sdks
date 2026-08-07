@@ -22,7 +22,7 @@ const client = new PactmanClient({
   ...(process.env.PACTMAN_BASE_URL ? { baseUrl: process.env.PACTMAN_BASE_URL } : {}),
 });
 
-const eins = ['41-1787097', '996589560', '996202676'];
+const eins = ['68-0343125', '996589560'];
 
 console.log(`Checking ${eins.length} EINs (server limit is ${MAX_BULK_EINS} per request).`);
 

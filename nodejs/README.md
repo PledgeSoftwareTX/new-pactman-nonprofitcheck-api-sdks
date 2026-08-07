@@ -94,8 +94,8 @@ const client = new PactmanClient({ apiKey: process.env.PACTMAN_API_KEY! });
 const { nonprofit, checkCount } = await client.nonprofits.check('41-1787097');
 
 console.log(nonprofit?.organization_name); // "EXAMPLE NONPROFIT"
-console.log(nonprofit?.pub78_verified);    // true
-console.log(checkCount);                   // checks consumed by this request
+console.log(nonprofit?.pub78_verified); // true
+console.log(checkCount); // checks consumed by this request
 ```
 
 CommonJS works the same way:
@@ -122,7 +122,7 @@ For a local mock server, a proxy, or a host Pactman has given you directly, set 
 // Testing against a local mock.
 const client = new PactmanClient({ apiKey, baseUrl: 'http://127.0.0.1:4010' });
 
-client.baseUrl;     // "http://127.0.0.1:4010"
+client.baseUrl; // "http://127.0.0.1:4010"
 client.environment; // null — an explicit host, not a named environment
 ```
 
@@ -133,12 +133,12 @@ Only the target host changes. Request and response semantics are identical.
 ```ts
 const result = await client.nonprofits.check('41-1787097');
 
-result.nonprofit;    // Nonprofit | null
-result.checkCount;   // checks consumed, from nonprofit_check_count
-result.timeTakenMs;  // server-side processing time
-result.status;       // HTTP status
-result.requestId;    // correlation ID, when the server sends one
-result.raw;          // the unmodified response envelope
+result.nonprofit; // Nonprofit | null
+result.checkCount; // checks consumed, from nonprofit_check_count
+result.timeTakenMs; // server-side processing time
+result.status; // HTTP status
+result.requestId; // correlation ID, when the server sends one
+result.raw; // the unmodified response envelope
 ```
 
 `'41-1787097'` and `'411787097'` are the same request — the EIN is normalized before the URL is built.
@@ -159,14 +159,14 @@ console.log(result.checkCount);
 
 Behaviour worth knowing:
 
-| | |
-|---|---|
-| **Batch limit** | 50 EINs per request, enforced locally before sending. Exported as `MAX_BULK_EINS`. |
-| **Chunking** | None. Larger inputs throw rather than silently splitting into several billable requests. |
-| **Order** | Preserved exactly as supplied. |
-| **Duplicates** | Kept by default, because each one consumes quota. Pass `{ dedupe: true }` to collapse them. |
-| **Empty input** | Throws `PactmanValidationError` locally. |
-| **One bad EIN** | The whole batch is rejected locally, identifying the failing index. Nothing is sent. |
+|                 |                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| **Batch limit** | 50 EINs per request, enforced locally before sending. Exported as `MAX_BULK_EINS`.          |
+| **Chunking**    | None. Larger inputs throw rather than silently splitting into several billable requests.    |
+| **Order**       | Preserved exactly as supplied.                                                              |
+| **Duplicates**  | Kept by default, because each one consumes quota. Pass `{ dedupe: true }` to collapse them. |
+| **Empty input** | Throws `PactmanValidationError` locally.                                                    |
+| **One bad EIN** | The whole batch is rejected locally, identifying the failing index. Nothing is sent.        |
 
 ```ts
 // Opt in to deduplication.
@@ -188,7 +188,7 @@ const pub78 = getPub78(nonprofit);
 if (pub78 === null) {
   console.log('Publication 78 data was not returned for this organization.');
 } else {
-  console.log(pub78.verified);    // true | false | null
+  console.log(pub78.verified); // true | false | null
   console.log(pub78.most_recent); // date of the Pub 78 record
 }
 
@@ -205,7 +205,7 @@ const ofac = getOfac(nonprofit);
 console.log(ofac?.status); // a sentence describing the finding
 ```
 
-Each accessor returns `null` only when the API returned **no data at all** for that source. That keeps *"the source was not returned"* distinct from an explicit negative such as `pub78_verified: false`.
+Each accessor returns `null` only when the API returned **no data at all** for that source. That keeps _"the source was not returned"_ distinct from an explicit negative such as `pub78_verified: false`.
 
 **On OFAC:** the API returns `ofac_status` as prose, not a boolean. This SDK deliberately does not expose a `hasOfacMatch` flag, because deriving one would mean pattern-matching English that could be reworded at any time. Read the status, or route it to a reviewer.
 
@@ -219,7 +219,7 @@ Unknown fields never break deserialization. Anything the API adds in a future ve
 const result = await client.nonprofits.check('411787097');
 
 result.nonprofit?.['some_future_field']; // readable without an SDK upgrade
-result.raw;                              // the complete, unmodified envelope
+result.raw; // the complete, unmodified envelope
 ```
 
 `null` and `false` are preserved as distinct values wherever the API distinguishes them.
@@ -230,8 +230,8 @@ result.raw;                              // the complete, unmodified envelope
 import { isValidEin, normalizeEin, normalizeEins } from '@pactmandev/nonprofit-check-plus';
 
 normalizeEin('41-1787097'); // "411787097"
-normalizeEin('411787097');  // "411787097"
-isValidEin('4117870');      // false
+normalizeEin('411787097'); // "411787097"
+isValidEin('4117870'); // false
 ```
 
 Accepted: nine digits, with or without the conventional hyphen after the two-digit prefix, ignoring surrounding whitespace. Rejected: letters, other punctuation, wrong digit counts, empty and null values. No IRS prefix rules are applied.
@@ -282,19 +282,19 @@ try {
 }
 ```
 
-| Class | Category | Origin | Raised for |
-|---|---|---|---|
-| `PactmanConfigurationError` | `configuration` | local | Unusable client options |
-| `PactmanValidationError` | `validation` | local | Input rejected before sending |
-| `PactmanBadRequestError` | `bad_request` | api | HTTP 400 |
-| `PactmanAuthenticationError` | `authentication` | api | HTTP 401 |
-| `PactmanAuthorizationError` | `authorization` | api | HTTP 403 |
-| `PactmanNotFoundError` | `not_found` | api | HTTP 404 |
-| `PactmanRateLimitError` | `rate_limit` | api | HTTP 429 |
-| `PactmanServerError` | `server` | api | HTTP 5xx |
-| `PactmanApiError` | `api` | api | Any other unexpected response |
-| `PactmanTimeoutError` | `timeout` | local | Exceeded the configured timeout |
-| `PactmanNetworkError` | `network` | local | No response, or caller cancellation |
+| Class                        | Category         | Origin | Raised for                          |
+| ---------------------------- | ---------------- | ------ | ----------------------------------- |
+| `PactmanConfigurationError`  | `configuration`  | local  | Unusable client options             |
+| `PactmanValidationError`     | `validation`     | local  | Input rejected before sending       |
+| `PactmanBadRequestError`     | `bad_request`    | api    | HTTP 400                            |
+| `PactmanAuthenticationError` | `authentication` | api    | HTTP 401                            |
+| `PactmanAuthorizationError`  | `authorization`  | api    | HTTP 403                            |
+| `PactmanNotFoundError`       | `not_found`      | api    | HTTP 404                            |
+| `PactmanRateLimitError`      | `rate_limit`     | api    | HTTP 429                            |
+| `PactmanServerError`         | `server`         | api    | HTTP 5xx                            |
+| `PactmanApiError`            | `api`            | api    | Any other unexpected response       |
+| `PactmanTimeoutError`        | `timeout`        | local  | Exceeded the configured timeout     |
+| `PactmanNetworkError`        | `network`        | local  | No response, or caller cancellation |
 
 API errors carry `status`, `apiCode`, `apiMessage`, `apiErrors`, `requestId`, `retryAfterSeconds`, `attempts`, and `raw`. When a body cannot be deserialized, the metadata is still preserved and `raw` holds what the server actually sent.
 
@@ -309,7 +309,7 @@ const client = new PactmanClient({ apiKey, timeoutMs: 10_000 });
 await client.nonprofits.check(ein, { timeoutMs: 5_000 });
 ```
 
-Pass an `AbortSignal` to cancel. Cancellation stops the in-flight request *and* any planned retries.
+Pass an `AbortSignal` to cancel. Cancellation stops the in-flight request _and_ any planned retries.
 
 ```ts
 const controller = new AbortController();
@@ -387,16 +387,16 @@ A successful check is data, not a decision. Whether an organization qualifies fo
 
 **Client** — `new PactmanClient(options)`
 
-| Option | Type | Default | |
-|---|---|---|---|
-| `apiKey` | `string` | — | **Required.** |
-| `environment` | `PactmanEnvironment` | `'production'` | Named environment. |
-| `baseUrl` | `string` | — | Explicit host; overrides `environment`. |
-| `timeoutMs` | `number` | `30000` | Per-attempt timeout. |
-| `retry` | `RetryOptions \| false` | 2 retries | Retry policy. |
-| `maxRequestsPerSecond` | `number` | off | Optional client-side throttle. |
-| `defaultHeaders` | `Record<string, string>` | `{}` | Extra headers; cannot override `Authorization`. |
-| `fetch` | `FetchLike` | global `fetch` | Custom HTTP implementation. |
+| Option                 | Type                     | Default        |                                                 |
+| ---------------------- | ------------------------ | -------------- | ----------------------------------------------- |
+| `apiKey`               | `string`                 | —              | **Required.**                                   |
+| `environment`          | `PactmanEnvironment`     | `'production'` | Named environment.                              |
+| `baseUrl`              | `string`                 | —              | Explicit host; overrides `environment`.         |
+| `timeoutMs`            | `number`                 | `30000`        | Per-attempt timeout.                            |
+| `retry`                | `RetryOptions \| false`  | 2 retries      | Retry policy.                                   |
+| `maxRequestsPerSecond` | `number`                 | off            | Optional client-side throttle.                  |
+| `defaultHeaders`       | `Record<string, string>` | `{}`           | Extra headers; cannot override `Authorization`. |
+| `fetch`                | `FetchLike`              | global `fetch` | Custom HTTP implementation.                     |
 
 Properties: `client.nonprofits`, `client.baseUrl`, `client.environment`, `client.timeoutMs`.
 
@@ -434,7 +434,7 @@ npm run examples:smoke
 
 ## Support
 
-- API documentation: <https://entities.pactman.org/api/entities/api-doc>
+- API documentation: <https://pactman.org/nonprofitcheckplus-api/docs>
 - Pactman: <https://pactman.org>
 - Issues: <https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/issues>
 

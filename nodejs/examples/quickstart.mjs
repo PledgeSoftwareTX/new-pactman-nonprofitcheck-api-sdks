@@ -22,7 +22,7 @@ const client = new PactmanClient({
   timeoutMs: 15_000,
 });
 
-const ein = process.argv[2] ?? '41-1787097';
+const ein = process.argv[2] ?? '68-0343125';
 const result = await client.nonprofits.check(ein);
 
 if (!result.nonprofit) {
@@ -44,10 +44,16 @@ const bmf = getBmf(nonprofit);
 const ofac = getOfac(nonprofit);
 
 console.log('\nIRS Publication 78');
-console.log(pub78 === null ? '  not returned' : `  listed: ${pub78.verified}, as of ${pub78.most_recent}`);
+console.log(
+  pub78 === null ? '  not returned' : `  listed: ${pub78.verified}, as of ${pub78.most_recent}`,
+);
 
 console.log('\nIRS Business Master File');
-console.log(bmf === null ? '  not returned' : `  status: ${bmf.status}, subsection: ${bmf.subsection_description}`);
+console.log(
+  bmf === null
+    ? '  not returned'
+    : `  status: ${bmf.status}, subsection: ${bmf.subsection_description}`,
+);
 
 console.log('\nOFAC');
 console.log(ofac === null ? '  not returned' : `  ${ofac.status}`);
