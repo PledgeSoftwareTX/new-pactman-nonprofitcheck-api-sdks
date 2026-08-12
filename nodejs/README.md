@@ -32,6 +32,12 @@ Official Node.js SDK for the **Pactman Nonprofit Check Plus API**. Look up US no
 - [What this SDK does not tell you](#what-this-sdk-does-not-tell-you)
 - [API reference](#api-reference)
 - [Examples](#examples)
+  - [Getting started](#getting-started) — EX-01 to EX-03
+  - [Comparing an applicant against the record](#comparing-an-applicant-against-the-record) — EX-04, EX-05
+  - [Reading the sources](#reading-the-sources) — EX-06 to EX-14
+  - [Errors and edge cases](#errors-and-edge-cases) — EX-15, EX-16, EX-22 to EX-25
+  - [Bulk](#bulk) — EX-17 to EX-21
+  - [End-to-end workflows](#end-to-end-workflows) — EX-26 to EX-30
 - [Verifying against a live deployment](#verifying-against-a-live-deployment)
 - [Support](#support)
 - [License](#license)
@@ -148,14 +154,14 @@ result.raw; // the unmodified response envelope
 ## Bulk check
 
 ```ts
-const result = await client.nonprofits.checkBulk(['41-1787097', '996589560', '996202676']);
+const result = await client.nonprofits.checkBulk(['41-1787097', '996589560', '999999999']);
 
 for (const org of result.organizations) {
   console.log(org.ein, org.organization_name);
 }
 
 // EINs with no record are not an error — they come back on a 200 response.
-console.log(result.notFoundEins); // ["996202676"]
+console.log(result.notFoundEins); // ["999999999"]
 console.log(result.checkCount);
 ```
 
@@ -440,25 +446,1059 @@ All public members carry TSDoc, so editor autocomplete and hover documentation w
 
 ## Examples
 
-Thirty numbered, runnable examples live in [`examples/`](./examples), covering secure setup, every source on the response, each error and edge case, bulk semantics, and five end-to-end workflows. They read `PACTMAN_API_KEY` from the environment and contain no credentials. [`examples/README.md`](./examples/README.md) indexes them.
+Thirty numbered, runnable examples cover secure setup, every source on the response, each error and edge case, bulk semantics, and five end-to-end workflows.
+
+Each one is reproduced below, condensed to the point it makes. Every snippet assumes the imports and a `client` from [Quick start](#quick-start), and omits the output formatting the runnable file uses. The full sources live in [`examples/`](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/tree/master/nodejs/examples) in the repository — they read `PACTMAN_API_KEY` from the environment and contain no credentials.
 
 ```bash
-npm run build   # the examples import the package by name
+git clone https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git
+cd new-pactman-nonprofitcheck-api-sdks/nodejs && npm install && npm run build
 
 PACTMAN_API_KEY=your_key node examples/ex-01-secure-client-init.mjs
 PACTMAN_API_KEY=your_key node examples/ex-03-identity-lookup.mjs 41-1787097
-PACTMAN_API_KEY=your_key npm run example:quickstart
 ```
 
-Examples for scenarios a live API will not produce on request — a revoked exemption, an OFAC match, an HTTP 429, a response carrying a field newer than this SDK — run against a bundled fixture server they start themselves.
-
-CI runs every example on every push:
+Examples for scenarios a live API will not produce on request — a revoked exemption, an OFAC match, an HTTP 429, a response carrying a field newer than this SDK — run against a bundled fixture server they start themselves. CI runs all thirty on every push:
 
 ```bash
 npm run examples:smoke                     # pass/fail
 EXAMPLES_VERBOSE=1 npm run examples:smoke  # with output
 npm run examples:smoke -- ex-22 ex-23      # a subset
 ```
+
+Three shorter files sit alongside the numbered set for a first read: [`quickstart.mjs`](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/quickstart.mjs) (`npm run example:quickstart`), [`bulk.mjs`](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/bulk.mjs) (`npm run example:bulk`) and [`error-handling.mjs`](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/error-handling.mjs) (`npm run example:errors`).
+
+### Getting started
+
+#### EX-01 — Secure client initialization
+
+Load the key from the environment, pick an environment, set a finite timeout, build one reusable client — and prove the key reaches no log, no exception, no debug output. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-01-secure-client-init.mjs)
+
+```js
+import { inspect } from 'node:util';
+import { PactmanClient, PactmanEnvironment } from '@pactmandev/nonprofit-check-plus';
+
+const apiKey = process.env.PACTMAN_API_KEY;
+
+if (!apiKey) {
+  throw new Error('Set PACTMAN_API_KEY. Load it from your secret manager or an ignored .env.');
+}
+
+// One client, built once, reused for the life of the process. Constructing a
+// client per request throws away connection reuse and any throttle state.
+const client = new PactmanClient({
+  apiKey,
+  environment: PactmanEnvironment.Production, // the default; naming it is explicit at review time
+  timeoutMs: 10_000,                          // the 30s default is often too long for a caller-facing service
+});
+
+// Every diagnostic surface, checked against the real key. None of them hold it.
+const surfaces = [inspect(client), JSON.stringify(client), client.toString()];
+
+surfaces.some(text => text.includes(apiKey)); // false
+```
+
+#### EX-02 — EIN normalization
+
+A hyphenated, whitespace-padded EIN normalized to nine digits before the request, with the original kept for diagnostics. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-02-ein-normalization.mjs)
+
+```js
+import { isValidEin, normalizeEin } from '@pactmandev/nonprofit-check-plus';
+
+const submitted = '  41-1787097  '; // what an onboarding form actually sends
+
+isValidEin(submitted); // true
+normalizeEin(submitted); // "411787097"
+
+// Store the normalized form as your key — it is what the API echoes back — and
+// keep the raw input beside it so support can see what the applicant typed.
+const applicant = { einAsSubmitted: submitted, ein: normalizeEin(submitted) };
+
+// check() normalizes internally too, so either form is the same request.
+const { nonprofit } = await client.nonprofits.check(applicant.einAsSubmitted);
+
+nonprofit?.ein; // "411787097"
+```
+
+#### EX-03 — Identity lookup
+
+EIN, name, AKA and Pactman profile URL, plus the raw envelope alongside the typed model. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-03-identity-lookup.mjs)
+
+```js
+const result = await client.nonprofits.check('41-1787097');
+
+if (result.nonprofit) {
+  const { nonprofit } = result;
+
+  nonprofit.ein;
+  nonprofit.organization_name;
+  nonprofit.organization_name_aka; // frequently null: "none on file", not "none exists"
+  nonprofit.pactman_org_url;
+
+  // Response metadata.
+  result.status;
+  result.requestId;
+  result.timeTakenMs;
+  result.checkCount;
+
+  // The typed model is a view over the envelope, not a replacement for it.
+  result.raw.code;
+  result.raw.message;
+  result.raw.data?.ein;
+}
+```
+
+### Comparing an applicant against the record
+
+#### EX-04 — Applicant name comparison
+
+Compare a submitted name with `organization_name` and `organization_name_aka` without treating punctuation or abbreviation differences as fraud. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-04-name-comparison.mjs)
+
+```js
+// The SDK deliberately has no namesMatch(). What counts as a match is policy,
+// so the comparison lives in customer code.
+const normalize = name =>
+  String(name)
+    .toUpperCase()
+    .replace(/\b(INC|INCORPORATED|CORP|CO|LLC|LTD|THE)\b\.?/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const { nonprofit } = await client.nonprofits.check(applicant.ein);
+
+const candidates = [nonprofit?.organization_name, nonprofit?.organization_name_aka].filter(
+  name => typeof name === 'string',
+);
+
+const outcome =
+  candidates.length === 0
+    ? 'not_returned' // no name came back — nothing was compared
+    : candidates.some(name => normalize(name) === normalize(applicant.legalName))
+      ? 'agreement'
+      : 'mismatch';
+
+// A mismatch is a reason to look, not a finding: organizations rebrand, file
+// under a parent, and appear in IRS data under a name no donor would recognize.
+const routed = outcome === 'agreement' ? 'continue' : 'manual_review';
+```
+
+#### EX-05 — Applicant address comparison
+
+Compare each address component, keeping "did not match" separate from "was not returned". [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-05-address-comparison.mjs)
+
+```js
+const COMPONENTS = ['address_line1', 'address_line2', 'city', 'state', 'state_name', 'zip'];
+
+const loosely = value => String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const zip5 = value => String(value).replace(/\D/g, '').slice(0, 5); // ZIP+4 vs ZIP5 is formatting
+
+const { nonprofit } = await client.nonprofits.check(applicant.ein);
+
+const outcomes = Object.fromEntries(
+  COMPONENTS.map(component => {
+    const submitted = applicant.address[component];
+    const returned = nonprofit?.[component];
+    const normalize = component === 'zip' ? zip5 : loosely;
+
+    // Three outcomes, never two. An organization whose zip came back null has
+    // not confirmed your applicant's ZIP code.
+    if (returned === null || returned === undefined) return [component, 'not_returned'];
+    if (submitted === null || submitted === undefined) return [component, 'not_submitted'];
+
+    return [component, normalize(submitted) === normalize(returned) ? 'match' : 'mismatch'];
+  }),
+);
+
+const conflicting = COMPONENTS.filter(component => outcomes[component] === 'mismatch');
+const missing = COMPONENTS.filter(component => outcomes[component] === 'not_returned');
+
+// This policy refuses to treat absence as confirmation.
+const routed = conflicting.length > 0 || missing.length > 0 ? 'manual_review' : 'continue';
+```
+
+### Reading the sources
+
+#### EX-06 — IRS Business Master File status
+
+Every IRS Business Master File field on the response — status, identity, subsection, exemption, ruling, foundation. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-06-bmf-status.mjs)
+
+```js
+import { getBmf } from '@pactmandev/nonprofit-check-plus';
+
+const bmf = getBmf(nonprofit);
+
+if (bmf === null) {
+  // Not "not in the BMF" — the API returned no BMF fields at all. That is an
+  // absence of evidence, not a negative finding. Route it to review.
+} else {
+  bmf.status; // one source's answer to one question — there is no isExempt here
+  bmf.exempt_status_code;
+  bmf.deductability_text;
+  bmf.most_recent;
+
+  bmf.organization_name, bmf.ein, bmf.street_address, bmf.city, bmf.state, bmf.church_message;
+  bmf.subsection, bmf.subsection_description;
+  bmf.ruling_month, bmf.ruling_year, bmf.group_exemption;
+  bmf.foundation_code, bmf.foundation_code_description;
+  bmf.foundation_type_code, bmf.foundation_type_description, bmf.foundation_509a_status;
+  bmf.filing_req_code, bmf.pf_filing_req_cd;
+}
+
+// Reading the BMF in isolation is how a revoked or sanctioned organization
+// passes a check — see EX-08 and EX-10.
+```
+
+#### EX-07 — Publication 78 and deductibility
+
+Publication 78 verification and deductibility entries, with a donation policy applied in customer code. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-07-pub78-deductibility.mjs)
+
+```js
+import { getPub78 } from '@pactmandev/nonprofit-check-plus';
+
+const pub78 = getPub78(nonprofit);
+
+pub78?.verified; // true | false | null
+pub78?.indicator;
+pub78?.church_message;
+pub78?.most_recent;
+pub78?.source_org_type_1; // …_2, …_3
+
+for (const entry of pub78?.organization_types ?? []) {
+  entry.deductibility_status_description;
+  entry.deductibility_limitation;
+  entry.organization_type;
+}
+
+// Your policy, expressed against the source data. Change the predicate, not the
+// SDK — nothing here is a verdict the API handed down.
+const ACCEPTED_LIMITATIONS = ['50%', '60%'];
+
+const limitations = (pub78?.organization_types ?? [])
+  .map(entry => entry.deductibility_limitation)
+  .filter(value => value !== null && value !== undefined);
+
+const eligibleUnderThisPolicy =
+  pub78?.verified === true && limitations.some(value => ACCEPTED_LIMITATIONS.includes(value));
+```
+
+#### EX-08 — Automatic revocation detected
+
+An organization in the IRS Automatic Revocation data, flagged and recorded with its source fields. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-08-automatic-revocation.mjs)
+
+```js
+import { getAroe } from '@pactmandev/nonprofit-check-plus';
+
+const aroe = getAroe(nonprofit);
+const revoked = Boolean(aroe?.revocation_code || aroe?.revocation_date);
+
+// The application's policy, in one place, expressed against source fields.
+const action = !revoked ? 'continue' : aroe.reinstatement_date ? 'manual_review' : 'block';
+
+// What you keep is what you can explain later. Store the source fields, the
+// request identifier and the time you looked — not just the verdict.
+const auditRecord = {
+  ein: nonprofit.ein,
+  checkedAt: new Date().toISOString(),
+  requestId: result.requestId,
+  action,
+  sourceFindings: {
+    revocation_code: nonprofit.revocation_code,
+    revocation_date: nonprofit.revocation_date,
+    reinstatement_date: nonprofit.reinstatement_date,
+    aroe_list_published_date: nonprofit.aroe_list_published_date,
+    bmf_status: nonprofit.bmf_status, // revocation shows up in the other sources too
+    pub78_verified: nonprofit.pub78_verified,
+  },
+};
+```
+
+#### EX-09 — Revocation with reinstatement
+
+Revocation and reinstatement dates kept separate, and the questions reinstatement does not answer. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-09-revocation-reinstatement.mjs)
+
+```js
+const aroe = getAroe(nonprofit);
+
+// The API formats dates as `M/DD/YYYY h:mm:ss AM`. Parse; never reformat in place.
+const parse = value => {
+  const parsed = value ? new Date(value) : null;
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+};
+
+const revokedAt = parse(aroe?.revocation_date);
+const reinstatedAt = parse(aroe?.reinstatement_date);
+
+// Nothing collapses the two into a "currently revoked" boolean — that boolean
+// would lose the interval, and donations dated inside it may need handling.
+if (revokedAt && reinstatedAt) {
+  const lapsedDays = Math.round((reinstatedAt.getTime() - revokedAt.getTime()) / 86_400_000);
+}
+
+// Reinstatement resolves one question, not every question: was it retroactive?
+// Do gifts made during the lapse need re-characterizing? Does your grant
+// agreement require continuous exemption? This record still goes to review.
+```
+
+#### EX-10 — OFAC screening result
+
+Four distinct OFAC outcomes — no match, match, null, and not screened at all. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-10-ofac-screening.mjs)
+
+```js
+import { getOfac } from '@pactmandev/nonprofit-check-plus';
+
+// The SDK exposes no hasOfacMatch boolean: deriving one means pattern-matching
+// English the source can reword at any time. The one textual test below
+// escalates and never clears — anything unrecognized falls through to review.
+function classifyOfac(nonprofit) {
+  const ofac = getOfac(nonprofit);
+
+  if (ofac === null) return 'unavailable'; // no OFAC field at all; nothing was screened
+  if (ofac.status === null || ofac.status === undefined) return 'null';
+  if (/UID:/i.test(ofac.status)) return 'match';
+  if (/NOT included/i.test(ofac.status)) return 'no_match';
+
+  return 'needs_review';
+}
+
+// Four states, four destinations. None of them is "approve automatically".
+const ROUTING = {
+  no_match: 'continue — screened against the SDN list with no match',
+  match: 'block and escalate to compliance',
+  null: 'hold — the field was returned empty; treat as unscreened, not as cleared',
+  unavailable: 'hold — no OFAC data was returned',
+  needs_review: 'hold — the status text was not recognized by this application',
+};
+
+ROUTING[classifyOfac(nonprofit)];
+```
+
+#### EX-11 — Cross-source conflict
+
+`irs_bmf_pub78_conflict` handled by recording both sources, not by picking one. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-11-source-conflict.mjs)
+
+```js
+const bmf = getBmf(nonprofit);
+const pub78 = getPub78(nonprofit);
+const findings = [];
+
+// The flag the API sets is authoritative; the comparisons only explain it.
+if (nonprofit.irs_bmf_pub78_conflict === true) {
+  findings.push('The API flagged a BMF / Publication 78 disagreement.');
+}
+
+if (bmf?.status === true && pub78?.verified === false) {
+  findings.push('The BMF lists the organization as exempt; Publication 78 does not list it.');
+}
+
+if (bmf?.status === false && pub78?.verified === true) {
+  findings.push('Publication 78 lists the organization; the BMF does not show it as exempt.');
+}
+
+// Both sides are kept, side by side, for the reviewer. Silently preferring one
+// source means being wrong for some organization with the evidence destroyed.
+const reviewRecord =
+  findings.length > 0
+    ? { ein: nonprofit.ein, requestId: result.requestId, findings, sources: { bmf, pub78 } }
+    : null;
+```
+
+#### EX-12 — Organization type and foundation classification
+
+Organization types, foundation and subsection classification for a grantmaker or DAF display. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-12-foundation-classification.mjs)
+
+```js
+const bmf = getBmf(nonprofit);
+const pub78 = getPub78(nonprofit);
+
+// What a grant officer sees. Every value is copied, none is computed — and the
+// descriptions come from the API's own *_description fields, which stay correct
+// when the source changes. A lookup table in your repository does not.
+const classificationPanel = {
+  subsection: bmf?.subsection_description,
+  foundationCode: bmf?.foundation_code_description,
+  foundationType: bmf?.foundation_type_description,
+  status509a: bmf?.foundation_509a_status,
+  deductibility: bmf?.deductability_text,
+  entries: pub78?.organization_types,
+};
+
+// A private foundation grantee is not disqualified — it is routed differently,
+// because expenditure responsibility and the deductibility limit both change.
+const isPrivateFoundation = bmf?.foundation_type_code === 'pf' || bmf?.pf_filing_req_cd === '1';
+```
+
+#### EX-13 — Filing and exemption metadata
+
+Filing and exemption codes preserved exactly, or mapped through documented tables with an unknown-value fallback. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-13-filing-exemption-metadata.mjs)
+
+```js
+const FILING_REQUIREMENTS = { '01': '990 (all other) or 990-EZ return', '02': '990 - Required to file Form 990-N' };
+
+// A documented table with an explicit unknown fallback. A value the IRS adds
+// reads as "unrecognized" — never as undefined, and never as the wrong label.
+function describe(table, code) {
+  if (code === null || code === undefined) return { code, known: false, display: '<not returned>' };
+
+  const description = table[code];
+
+  return { code, known: description !== undefined, display: description ?? `unrecognized code "${code}"` };
+}
+
+const bmf = getBmf(nonprofit);
+
+describe(FILING_REQUIREMENTS, bmf?.filing_req_code);
+
+// Codes the API already describes for you: read its description, do not shadow
+// it with a local table that will drift.
+bmf?.subsection, bmf?.subsection_description;
+bmf?.foundation_code, bmf?.foundation_code_description;
+bmf?.ruling_month, bmf?.ruling_year; // raw values, preserved exactly, null included
+
+// Never coerce an unrecognized code to a default. "Unknown" is a real state,
+// and it usually means review rather than approval.
+```
+
+#### EX-14 — Data freshness and report metadata
+
+Source timestamps, report date and request timing, feeding an application-owned re-review rule. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-14-data-freshness.mjs)
+
+```js
+// Your rule. The SDK has no isStale and no default threshold, because 90 days
+// is prudent for one workflow and reckless for another.
+const RE_REVIEW_AFTER_DAYS = 90;
+
+const timestamps = {
+  organization_info_last_modified: nonprofit.organization_info_last_modified,
+  report_date: nonprofit.report_date, // when this response was generated
+  most_recent_bmf: nonprofit.most_recent_bmf, // when each list was last refreshed
+  most_recent_pub78: nonprofit.most_recent_pub78,
+  ofac_list_published_date: nonprofit.ofac_list_published_date,
+  aroe_list_published_date: nonprofit.aroe_list_published_date,
+};
+
+const ages = Object.entries(timestamps).map(([name, value]) => ({
+  name,
+  ageDays: value ? Math.round((Date.now() - new Date(value).getTime()) / 86_400_000) : null,
+}));
+
+const undated = ages.filter(entry => entry.ageDays === null);
+const oldest = Math.max(...ages.map(entry => entry.ageDays ?? 0));
+
+// The oldest source governs, and an undated source is not a fresh one.
+const needsReReview = oldest > RE_REVIEW_AFTER_DAYS || undated.length > 0;
+
+// Store the timestamps with the verification record, not just the outcome. "We
+// checked and it was fine" is not an answer six months later; "we checked on
+// this date against BMF data published on that date" is.
+const evidence = { ein: nonprofit.ein, checkedAt: new Date().toISOString(), requestId: result.requestId, ...timestamps };
+```
+
+### Errors and edge cases
+
+#### EX-15 — Malformed EIN rejected locally
+
+Every malformed shape rejected locally, with an instrumented `fetch` proving no request was sent. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-15-malformed-ein.mjs)
+
+```js
+import { PactmanClient, PactmanValidationError } from '@pactmandev/nonprofit-check-plus';
+
+// A counting wrapper around the runtime's fetch, to prove the claim rather than
+// assert it. If any call below reaches the network, this number moves.
+let requestsSent = 0;
+
+const client = new PactmanClient({
+  apiKey: process.env.PACTMAN_API_KEY,
+  fetch: (input, init) => {
+    requestsSent += 1;
+    return globalThis.fetch(input, init);
+  },
+});
+
+const bad = ['41178709', '4117870977', '41-178709A', '', '   ', null, 411787097, '41.1787097', '411-787097'];
+
+for (const value of bad) {
+  try {
+    await client.nonprofits.check(value);
+  } catch (error) {
+    if (!(error instanceof PactmanValidationError)) throw error;
+
+    error.origin; // "local"
+    error.issues[0]; // { index, value, message } — enough to highlight the form field
+  }
+}
+
+// Bulk reports every failure at once, by index.
+await client.nonprofits.checkBulk(['411787097', 'nope', '996589560']).catch(error => error.issues);
+
+requestsSent; // 0 — bad input costs no quota, no latency, no rate-limit budget
+```
+
+#### EX-16 — EIN not found
+
+A well-formed EIN with no record: `PactmanNotFoundError`, sanitized diagnostics, and why bulk behaves differently. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-16-not-found.mjs)
+
+```js
+import { PactmanApiError, PactmanNotFoundError, isPactmanError } from '@pactmandev/nonprofit-check-plus';
+
+try {
+  await client.nonprofits.check('999999999');
+} catch (error) {
+  if (!(error instanceof PactmanNotFoundError)) throw error;
+
+  // Stable identity: class, category, origin. Never parse `message`.
+  error.category; // "not_found"
+  error.origin; // "api"
+  error instanceof PactmanApiError; // true — catch the specific case or the general one
+  isPactmanError(error); // true
+
+  // The envelope's own detail survives onto the error.
+  error.status, error.apiCode, error.apiMessage, error.requestId, error.apiErrors;
+  error.attempts; // 1 — not-found is not a transient failure, so it is never retried
+
+  JSON.stringify(error); // sanitized: safe to log, safe to attach to a support ticket
+}
+
+// The bulk endpoint behaves differently: unmatched EINs come back on a 200.
+const mixed = await client.nonprofits.checkBulk(['411787097', '999999999']);
+
+mixed.status; // 200
+mixed.notFoundEins; // ["999999999"]
+
+// Only a request where nothing at all matched is a 404.
+```
+
+#### EX-22 — Rate limits and `Retry-After`
+
+HTTP 429, `Retry-After`, bounded retries, a client-side rate ceiling and a bounded concurrency pool. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-22-rate-limit.mjs)
+
+```js
+import { PactmanClient, PactmanRateLimitError } from '@pactmandev/nonprofit-check-plus';
+
+// 1. Retries off, so the 429 reaches the caller untouched.
+try {
+  await client.nonprofits.check(ein, { retry: false });
+} catch (error) {
+  if (!(error instanceof PactmanRateLimitError)) throw error;
+
+  error.status; // 429
+  error.retryAfterSeconds; // the server's number, when it sent one
+  error.requestId, error.attempts, error.apiErrors;
+
+  // Schedule your own backoff from the server's number; fall back when absent.
+  const retryAt = new Date(Date.now() + (error.retryAfterSeconds ?? 5) * 1000);
+}
+
+// 2. Bounded automatic retry. Retry-After wins over computed backoff, and
+//    retries stay finite — the SDK never retries indefinitely.
+await client.nonprofits.check(ein, { retry: { maxRetries: 1, respectRetryAfter: true } });
+
+// 3. Reduce pressure rather than absorb rejections: cap the outbound rate, keep
+//    your own concurrency small, and prefer one bulk call to a fan-out of
+//    single ones. The SDK does not queue on your behalf.
+const paced = new PactmanClient({ apiKey, maxRequestsPerSecond: 3, retry: { maxRetries: 2 } });
+```
+
+#### EX-23 — Transient failures and retries
+
+Transient 5xx and connection failures retried with jittered backoff; auth, validation and not-found never retried. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-23-transient-retries.mjs)
+
+```js
+import { PactmanNetworkError, PactmanNotFoundError } from '@pactmandev/nonprofit-check-plus';
+
+// Two 503s absorbed, one successful result returned to the caller. Backoff
+// grows exponentially and is jittered, so parallel clients scatter.
+const result = await client.nonprofits.check(ein, {
+  retry: { maxRetries: 3, initialDelayMs: 500, maxDelayMs: 8_000 },
+});
+
+// Never retried, whatever retryableStatuses contains. Retrying a 404 cannot
+// make a record exist; retrying a rejected key just burns it three times.
+try {
+  await client.nonprofits.check(missingEin, { retry: { maxRetries: 5, retryableStatuses: [404, 500] } });
+} catch (error) {
+  if (error instanceof PactmanNotFoundError) error.attempts; // 1
+}
+
+// A connection that never reached a server: retried, then surfaced with the
+// attempt count. Local validation never reaches the network at all.
+try {
+  await unreachable.nonprofits.check(ein);
+} catch (error) {
+  if (error instanceof PactmanNetworkError) error.attempts;
+}
+
+// A retried failure that exhausts its budget is an outage. Record it as "not
+// checked", never as a pass.
+```
+
+#### EX-24 — Timeouts and cancellation
+
+`PactmanTimeoutError` and `AbortSignal` cancellation kept distinguishable, with no work left running. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-24-timeout-and-cancellation.mjs)
+
+```js
+import { PactmanNetworkError, PactmanTimeoutError } from '@pactmandev/nonprofit-check-plus';
+
+// Two different events, two different types. Conflating them hides which side
+// gave up: a timeout means raise the budget or shed load; a cancellation means
+// the caller went away.
+try {
+  await client.nonprofits.check(ein, { timeoutMs: 250, retry: false });
+} catch (error) {
+  if (error instanceof PactmanTimeoutError) {
+    error.timeoutMs; // the deadline you configured expired
+    error.category; // "timeout", origin "local"
+  }
+}
+
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(new Error('user navigated away')), 200);
+
+try {
+  await client.nonprofits.check(ein, { signal: controller.signal, timeoutMs: 10_000 });
+} catch (error) {
+  // PactmanNetworkError, category "network", origin "local".
+  // Aborting cancels the in-flight attempt and every retry still planned;
+  // aborting before the call means no request is made at all.
+  if (error instanceof PactmanNetworkError) error.cause;
+} finally {
+  clearTimeout(timer); // a stray timer is exactly the unbounded work this avoids
+}
+```
+
+#### EX-25 — Raw response and forward compatibility
+
+An approved fixture from a newer API version: unknown fields and an unknown enum value, both readable, neither fatal. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-25-raw-and-forward-compat.mjs)
+
+```js
+const result = await client.nonprofits.check(ein);
+const { nonprofit } = result;
+
+// Known fields deserialize exactly as they always have.
+getBmf(nonprofit)?.status;
+
+// Fields this SDK version does not declare ride along on the same object. In
+// TypeScript they are reachable through the index signature, typed as
+// `unknown`, so you narrow them deliberately. No cast, no upgrade.
+const registration = nonprofit['state_charity_registration_status'];
+
+if (typeof registration === 'string') {
+  // …
+}
+
+// An unrecognized value in a documented field. This is the case that breaks
+// applications which map eagerly into an enum and default the miss.
+const KNOWN_FOUNDATION_TYPES = new Set(['pc', 'pf', 'po']);
+const foundationType = getBmf(nonprofit)?.foundation_type_code;
+
+const handled = KNOWN_FOUNDATION_TYPES.has(foundationType)
+  ? 'a known classification'
+  : 'unknown — routed to review, not defaulted to a known type';
+
+result.raw; // the parsed body, unmodified — persist it to prove what the API said
+result.raw.data === nonprofit; // true
+```
+
+### Bulk
+
+#### EX-17 — Bulk screening of a list
+
+Screening a grantee list, iterating organization-level results and reading the response envelope. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-17-bulk-screening.mjs)
+
+```js
+import { getAroe, getBmf, getOfac, getPub78 } from '@pactmandev/nonprofit-check-plus';
+
+// One bulk request is one round trip and one rate-limit slot. Prefer it to a
+// loop of single checks.
+const result = await client.nonprofits.checkBulk(portfolio.map(entry => entry.ein));
+
+result.status, result.raw.code, result.timeTakenMs, result.checkCount;
+result.organizations.length, result.errors.length, result.notFoundEins;
+
+// Index by EIN. The response is a set of matched records, not a row-for-row
+// answer to your input list — see EX-18.
+const byEin = new Map(result.organizations.map(org => [org.ein, org]));
+
+for (const entry of portfolio) {
+  const org = byEin.get(entry.ein);
+
+  if (!org) continue; // no record returned — not a pass
+
+  const bmf = getBmf(org);
+  const pub78 = getPub78(org);
+  const aroe = getAroe(org);
+  const ofac = getOfac(org);
+
+  console.log(org.ein, bmf?.status, pub78?.verified, Boolean(aroe?.revocation_date), ofac?.status);
+}
+
+for (const detail of result.errors) {
+  detail.resource, detail.code, detail.reason, detail.eins;
+}
+```
+
+#### EX-18 — Input order and duplicate EINs
+
+Response order does not follow request order, duplicates collapse in the response but still bill, and usage is read rather than inferred. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-18-bulk-order-and-duplicates.mjs)
+
+```js
+// Deliberately unsorted, with one EIN repeated. The SDK sends them exactly as
+// supplied: it does not reorder and it does not deduplicate.
+const requested = ['996589560', '411787097', '996589560', '135562308'];
+
+const before = await client.nonprofits.check('411787097');
+const result = await client.nonprofits.checkBulk(requested);
+
+result.organizations.length; // 3 — the duplicate came back once
+
+// Positional pairing is invalid. This is the pairing that always holds.
+const byEin = new Map(result.organizations.map(org => [org.ein, org]));
+
+// Usage is reported, not inferred. Every submitted EIN is billable, duplicates
+// included, so a count derived from unique inputs will disagree with the invoice.
+(result.checkCount ?? 0) - (before.checkCount ?? 0);
+
+// Opt in when duplicates are an artifact of your data rather than intent.
+await client.nonprofits.checkBulk(requested, { dedupe: true });
+```
+
+#### EX-19 — Partial success and item-level errors
+
+Mixed outcomes on one HTTP 200: usable records, item-level errors, and a full input reconciliation. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-19-bulk-partial-success.mjs)
+
+```js
+const submitted = ['411787097', '999999999', '996589560', '123456789'];
+const result = await client.nonprofits.checkBulk(submitted);
+
+result.status; // 200 — some matched and some did not, which is a success
+result.organizations; // ordinary records; nothing about a sibling failure degrades them
+result.errors; // [{ resource, code, reason, eins }]
+result.notFoundEins;
+
+// Reconcile every input against an outcome. This is the loop that keeps a
+// portfolio import honest.
+const matched = new Map(result.organizations.map(org => [org.ein, org]));
+const missing = new Set(result.notFoundEins);
+
+for (const ein of submitted) {
+  const outcome = matched.has(ein)
+    ? 'matched'
+    : missing.has(ein)
+      ? 'no record — reported in errors'
+      : 'UNACCOUNTED FOR — do not treat as checked';
+}
+
+// An EIN the API has no record for is a gap in the data, not a negative finding
+// about the organization. Route it to review; do not record it as "screened".
+```
+
+#### EX-20 — Batch-size validation and chunking
+
+Empty and over-limit batches rejected against `MAX_BULK_EINS`, plus chunking a larger list yourself. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-20-bulk-batch-limits.mjs)
+
+```js
+import { MAX_BULK_EINS, PactmanBadRequestError, PactmanValidationError } from '@pactmandev/nonprofit-check-plus';
+
+MAX_BULK_EINS; // 50 — import it; do not copy the number into your own constants file
+
+try {
+  await client.nonprofits.checkBulk([]); // empty
+  await client.nonprofits.checkBulk(oversized); // MAX_BULK_EINS + 1
+} catch (error) {
+  if (error instanceof PactmanValidationError) {
+    error.origin; // "local" — nothing was sent
+  }
+}
+
+// If the server ever tightens its limit below the SDK's constant, the local
+// check passes and the server answers 400. That message is authoritative:
+// catch PactmanBadRequestError and log apiErrors[].reason verbatim.
+
+// The SDK never chunks for you, because splitting one batch would quietly turn
+// one billable request into several. Do it deliberately.
+const batches = [];
+
+for (let index = 0; index < eins.length; index += MAX_BULK_EINS) {
+  batches.push(eins.slice(index, index + MAX_BULK_EINS));
+}
+```
+
+#### EX-21 — Billing-cycle usage tracking
+
+`nonprofit_check_count` as a cumulative billing-cycle total that resets each cycle — never a per-request size. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-21-usage-tracking.mjs)
+
+```js
+const first = await client.nonprofits.check(einA);
+const bulk = await client.nonprofits.checkBulk([einA, einB, einC]);
+
+first.checkCount; // cycle total, e.g. 1_281
+bulk.checkCount; // cycle total again, e.g. 1_284 — not 3
+(bulk.checkCount ?? 0) - (first.checkCount ?? 0); // what the bulk call consumed
+
+// EINs with no record are not billed, so a delta can be smaller than the batch.
+// At the start of a new billing cycle this counter resets to zero.
+
+// Alerting needs your plan's allowance, which the check endpoints do not
+// report. Keep it in your own configuration.
+const allowance = Number(process.env.PACTMAN_PLAN_ALLOWANCE ?? 0);
+const utilisation = allowance > 0 ? (bulk.checkCount ?? 0) / allowance : null;
+
+// Label this metric "checks used this billing cycle" wherever it is displayed.
+// Labelling it "checks in this request" makes a dashboard that resets monthly
+// look like a dashboard that is broken.
+```
+
+### End-to-end workflows
+
+#### EX-26 — Donation-platform onboarding
+
+Donation-platform onboarding: collect, check, inspect every source, route to approve, reject or review. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-26-onboarding-workflow.mjs)
+
+```js
+// This fictional platform's rules, in one place, reviewable by its compliance
+// team. Read them as an illustration of where your policy lives.
+const POLICY = { staleAfterDays: 120, requirePub78Listing: true };
+
+async function onboard(applicant) {
+  let result;
+
+  try {
+    result = await client.nonprofits.check(applicant.ein);
+  } catch (error) {
+    // A failed lookup is not a rejection. Nothing was learned, so nothing can
+    // be concluded — the applicant waits, they are not turned away.
+    return { decision: 'manual_review', reasons: ['the check could not be completed'] };
+  }
+
+  const { nonprofit } = result;
+
+  if (!nonprofit) return { decision: 'manual_review', reasons: ['no record for this EIN'] };
+
+  const aroe = getAroe(nonprofit);
+  const ofac = getOfac(nonprofit);
+  const pub78 = getPub78(nonprofit);
+  const reasons = [];
+
+  if (aroe?.revocation_date && !aroe.reinstatement_date) {
+    return { decision: 'reject', reasons: ['Exemption revoked with no reinstatement.'] };
+  }
+
+  if (ofac?.status && /UID:/i.test(ofac.status)) {
+    return { decision: 'reject', reasons: ['Possible OFAC SDN match.'] };
+  }
+
+  if (nonprofit.irs_bmf_pub78_conflict === true) reasons.push('IRS sources disagree.');
+  if (POLICY.requirePub78Listing && pub78?.verified !== true) reasons.push('Not listed in Publication 78.');
+  if (!nameAgrees(applicant.legalName, nonprofit)) reasons.push('Submitted name did not match.');
+
+  return reasons.length === 0
+    ? { decision: 'approve', reasons: ['Every check this platform requires was satisfied.'] }
+    : { decision: 'manual_review', reasons };
+}
+
+// The platform decided; the SDK did not.
+```
+
+#### EX-27 — DAF grant-recommendation screening
+
+DAF grant-recommendation screening, with a stricter policy than EX-26 over identical data. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-27-daf-grant-screening.mjs)
+
+```js
+// One bulk call for the whole recommendation batch.
+const result = await client.nonprofits.checkBulk(recommendations.map(entry => entry.ein));
+const byEin = new Map(result.organizations.map(org => [org.ein, org]));
+const decisions = [];
+
+for (const recommendation of recommendations) {
+  const org = byEin.get(recommendation.ein);
+
+  if (!org) {
+    // No record was returned. Nothing was verified.
+    decisions.push({ ...recommendation, outcome: 'held', queue: 'grants_review' });
+    continue;
+  }
+
+  const aroe = getAroe(org);
+  const ofac = getOfac(org);
+  const bmf = getBmf(org);
+
+  const [outcome, queue] =
+    ofac?.status && /UID:/i.test(ofac.status)
+      ? ['blocked', 'sanctions_review']
+      : aroe?.revocation_date && !aroe.reinstatement_date
+        ? ['blocked', 'tax_status_review']
+        : org.irs_bmf_pub78_conflict === true
+          ? ['held', 'source_conflict_review']
+          : bmf?.foundation_type_code === 'pf'
+            ? ['held', 'expenditure_responsibility'] // not refused: a different path
+            : ['advanced', 'ready_for_approval'];
+
+  decisions.push({ ...recommendation, outcome, queue, screenedAt: new Date().toISOString(), requestId: result.requestId });
+}
+
+// Same API data as EX-26, different obligations, different outcomes. That
+// difference is precisely why the SDK does not decide.
+```
+
+#### EX-28 — CRM enrichment and synchronization
+
+CRM sync keyed on EIN, where a `null` from the API never erases better customer data. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-28-crm-enrichment.mjs)
+
+```js
+const SYNCED_FIELDS = [
+  'organization_name', 'organization_name_aka',
+  'address_line1', 'address_line2', 'city', 'state', 'state_name', 'zip',
+  'subsection_description', 'foundation_type_description',
+  'bmf_status', 'pub78_verified', 'pactman_org_url', 'organization_info_last_modified',
+];
+
+// A field is written only when the API returned a usable value. `null` and
+// absent both mean "no update available" — never "clear this". A sync that
+// overwrites a good, human-entered address with null is a data-loss bug that
+// looks like a feature until someone notices.
+function merge(record, nonprofit) {
+  const next = { ...record };
+
+  for (const key of SYNCED_FIELDS) {
+    const incoming = nonprofit[key];
+
+    if (incoming === null || incoming === undefined) continue; // keep what the CRM holds
+
+    next[key] = incoming;
+  }
+
+  return next;
+}
+
+// EIN is the join key: stable, returned on every record, already in your CRM.
+// Names change; EINs do not.
+const result = await client.nonprofits.checkBulk([...crm.keys()]);
+const byEin = new Map(result.organizations.map(org => [org.ein, org]));
+
+for (const [ein, record] of crm) {
+  const nonprofit = byEin.get(ein);
+
+  if (!nonprofit) {
+    // A failed lookup is not new information. Leave the row untouched.
+    crm.set(ein, { ...record, lastSyncAttemptAt: new Date().toISOString() });
+    continue;
+  }
+
+  crm.set(ein, {
+    ...merge(record, nonprofit),
+    verifiedAt: new Date().toISOString(), // without this, a row checked yesterday and
+    verificationRequestId: result.requestId, // one imported in 2019 look identical
+    verificationReportDate: nonprofit.report_date,
+  });
+}
+```
+
+#### EX-29 — Pre-disbursement recheck
+
+Recheck immediately before a payout; a material change pauses it and both evidence sets are kept. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-29-pre-disbursement-recheck.mjs)
+
+```js
+// Changes that stop a disbursement outright at this organization.
+const BLOCKING = new Set([
+  'revocation_code', 'revocation_date', 'ofac_state',
+  'bmf_status', 'pub78_verified', 'irs_bmf_pub78_conflict',
+]);
+
+async function recheck(payment, stored) {
+  let result;
+
+  try {
+    // Retries stay on: a transient failure should be absorbed, not turned into
+    // a false "changed" signal.
+    result = await client.nonprofits.check(payment.ein, { timeoutMs: 10_000 });
+  } catch (error) {
+    // An unreachable API is not evidence that anything is fine.
+    return { decision: 'hold', reason: 'recheck_failed' };
+  }
+
+  if (!result.nonprofit) return { decision: 'hold', reason: 'no_record' };
+
+  // collectFindings is your own projection of the response — store findings,
+  // not a verdict: "approved" alone cannot be re-examined.
+  const current = collectFindings(result.nonprofit);
+  const changes = Object.keys(current).filter(key => current[key] !== stored.findings[key]);
+  const blocking = changes.filter(key => BLOCKING.has(key));
+
+  // Both snapshots are kept. Neither overwrites the other.
+  return {
+    decision: blocking.length > 0 ? 'hold' : 'release',
+    priorVerification: stored,
+    currentVerification: {
+      checkedAt: new Date().toISOString(),
+      requestId: result.requestId,
+      reportDate: result.nonprofit.report_date,
+      findings: current,
+    },
+    changes,
+  };
+}
+
+// An organization approved at onboarding is not an organization approved today.
+// Recheck as close to the money movement as your workflow allows.
+```
+
+#### EX-30 — Scheduled portfolio re-verification
+
+Scheduled bulk re-verification with a diff against the last run and an explainable audit trail. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-30-portfolio-reverification.mjs)
+
+```js
+import { MAX_BULK_EINS } from '@pactmandev/nonprofit-check-plus';
+
+// Identify the rules that produced an outcome, so old entries stay readable.
+const POLICY_VERSION = '2026.02-portfolio-rev3';
+const RE_REVIEW_INTERVAL_DAYS = 90;
+
+const records = new Map();
+
+for (const eins of chunk(portfolio.map(entry => entry.ein), MAX_BULK_EINS)) {
+  const result = await client.nonprofits.checkBulk(eins);
+
+  for (const org of result.organizations) {
+    records.set(org.ein, { org, requestId: result.requestId, status: result.status });
+  }
+
+  // An EIN that produced no record is unverified this cycle, not clean.
+  for (const ein of result.notFoundEins) {
+    records.set(ein, { org: null, requestId: result.requestId, status: result.status });
+  }
+}
+
+for (const entry of portfolio) {
+  const record = records.get(entry.ein);
+  const findings = record?.org ? collectFindings(record.org) : null;
+
+  // A first run has nothing to compare against; say so rather than reporting
+  // every field as "changed".
+  const isBaseline = entry.lastFindings === null;
+  const changes = isBaseline || !findings ? [] : diffFindings(entry.lastFindings, findings);
+
+  auditLog.push({
+    ein: entry.ein,
+    checkedAt: runStartedAt.toISOString(),
+    requestId: record?.requestId ?? null, // identifiers are stored; API keys never are
+    policyVersion: POLICY_VERSION,
+    outcome, // suspend | review | retain
+    changes,
+    findings,
+    nextReviewDue: new Date(runStartedAt.getTime() + RE_REVIEW_INTERVAL_DAYS * 86_400_000).toISOString(),
+  });
+
+  entry.lastFindings = findings; // carry the snapshot forward for the next run
+}
+
+// What makes an audit trail useful is the evidence next to the outcome: when
+// the check ran, which request it was, what each source said, and which policy
+// version read them.
+```
+
+### One thing every example repeats
+
+The SDK reports what the API returned. It produces no `approved`, `eligible` or `safe` verdict, and no boolean summarizing a source the API does not itself express as a boolean. Whether an organization qualifies for a donation, a grant, a match or a payout is a determination for your own legal, compliance and risk policy — which is why the routing logic in these examples lives in the example, never in the library.
 
 ## Verifying against a live deployment
 

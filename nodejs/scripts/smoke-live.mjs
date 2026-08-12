@@ -315,6 +315,23 @@ function assert(condition, message) {
   }
 }
 
+/**
+ * True when a 404 came from the free-tier EIN allowlist rather than from an
+ * absent record.
+ *
+ * A free key carries a fixed set of accessible EINs. The server requires every
+ * EIN in a bulk body to be on that list and answers 404 for the whole batch
+ * otherwise, before any lookup runs — so partial success cannot be reached with
+ * such a key. That is a property of the key, not of the deployment, and the
+ * checks it makes unreachable are skipped rather than failed.
+ */
+function isFreeTierRestriction(error) {
+  return (
+    error instanceof PactmanNotFoundError &&
+    (error.apiErrors ?? []).some(detail => /accessible nonprofits/i.test(String(detail?.reason)))
+  );
+}
+
 // --- small helpers ----------------------------------------------------------
 
 /** True when the API returned the field at all, `null` included. */
@@ -1630,7 +1647,29 @@ function bulkChecks(options, eins) {
     cost: bulkEins.length + 1,
     async body(runner) {
       const submitted = [...bulkEins, options.missingEin];
-      const result = await runner.client.nonprofits.checkBulk(submitted);
+      let result;
+
+      try {
+        result = await runner.client.nonprofits.checkBulk(submitted);
+      } catch (error) {
+        if (!isFreeTierRestriction(error)) {
+          throw error;
+        }
+
+        // The batch was refused for containing an EIN outside the key's
+        // allowlist, so nothing was looked up and partial success was never
+        // exercised. Record the key class for the checks that depend on it.
+        runner.freeTierKey = true;
+        runner.note(
+          'bulk partial success',
+          `this key restricts bulk requests to a fixed set of EINs, so a batch containing ${options.missingEin} was refused whole — rerun with a key that has open bulk access to verify partial success`,
+        );
+
+        return {
+          status: 'skip',
+          detail: 'the key restricts bulk EINs to an allowlist — partial success is unreachable',
+        };
+      }
 
       runner.observeCycleCount(result.checkCount);
       runner.bulkResult = result;
@@ -1906,6 +1945,21 @@ function recheckChecks(ein) {
         assert(end >= start, `the counter went backwards: ${start} → ${end}`);
 
         if (end === start) {
+          // A free key reports the size of each request rather than a running
+          // cycle total, so a flat counter is the documented behaviour for that
+          // key class and proves nothing about the cumulative contract.
+          if (runner.freeTierKey) {
+            runner.note(
+              'check count is cumulative',
+              `the counter reported the size of each request and never accumulated (${start} → ${end}) — expected for a key with allowlisted EINs`,
+            );
+
+            return {
+              status: 'skip',
+              detail: 'this key reports a per-request count — a cumulative total needs a metered key',
+            };
+          }
+
           runner.note(
             'check count is cumulative',
             `the counter did not move across ${runner.checksSpent} billable checks (${start} → ${end})`,
