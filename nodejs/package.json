@@ -1,6 +1,6 @@
 {
   "name": "@pactmandev/nonprofit-check-plus",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Official Node.js SDK for the Pactman Nonprofit Check Plus API — verify US nonprofits by EIN against IRS BMF, Publication 78, Automatic Revocation and OFAC data.",
   "keywords": [
     "pactman",
