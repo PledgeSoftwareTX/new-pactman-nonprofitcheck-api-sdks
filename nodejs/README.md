@@ -20,6 +20,7 @@ Official Node.js SDK for the **Pactman Nonprofit Check Plus API**. Look up US no
 - [Environment and base URL](#environment-and-base-url)
 - [Single check](#single-check)
 - [Bulk check](#bulk-check)
+- [Usage and billing cycle](#usage-and-billing-cycle)
 - [Inspecting source-specific findings](#inspecting-source-specific-findings)
 - [Response models and raw data](#response-models-and-raw-data)
 - [EIN validation and normalization](#ein-validation-and-normalization)
@@ -31,6 +32,7 @@ Official Node.js SDK for the **Pactman Nonprofit Check Plus API**. Look up US no
 - [What this SDK does not tell you](#what-this-sdk-does-not-tell-you)
 - [API reference](#api-reference)
 - [Examples](#examples)
+- [Verifying against a live deployment](#verifying-against-a-live-deployment)
 - [Support](#support)
 - [License](#license)
 
@@ -95,7 +97,7 @@ const { nonprofit, checkCount } = await client.nonprofits.check('41-1787097');
 
 console.log(nonprofit?.organization_name); // "EXAMPLE NONPROFIT"
 console.log(nonprofit?.pub78_verified); // true
-console.log(checkCount); // checks consumed by this request
+console.log(checkCount); // checks used so far this billing cycle
 ```
 
 CommonJS works the same way:
@@ -134,7 +136,7 @@ Only the target host changes. Request and response semantics are identical.
 const result = await client.nonprofits.check('41-1787097');
 
 result.nonprofit; // Nonprofit | null
-result.checkCount; // checks consumed, from nonprofit_check_count
+result.checkCount; // nonprofit_check_count — see "Usage and billing cycle" below
 result.timeTakenMs; // server-side processing time
 result.status; // HTTP status
 result.requestId; // correlation ID, when the server sends one
@@ -159,19 +161,40 @@ console.log(result.checkCount);
 
 Behaviour worth knowing:
 
-|                 |                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------- |
-| **Batch limit** | 50 EINs per request, enforced locally before sending. Exported as `MAX_BULK_EINS`.          |
-| **Chunking**    | None. Larger inputs throw rather than silently splitting into several billable requests.    |
-| **Order**       | Preserved exactly as supplied.                                                              |
-| **Duplicates**  | Kept by default, because each one consumes quota. Pass `{ dedupe: true }` to collapse them. |
-| **Empty input** | Throws `PactmanValidationError` locally.                                                    |
-| **One bad EIN** | The whole batch is rejected locally, identifying the failing index. Nothing is sent.        |
+|                    |                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Batch limit**    | 50 EINs per request, enforced locally before sending. Exported as `MAX_BULK_EINS`.                                            |
+| **Chunking**       | None. Larger inputs throw rather than silently splitting into several billable requests.                                      |
+| **Request order**  | Your EINs are sent exactly as supplied. The SDK never reorders them.                                                          |
+| **Response order** | Not guaranteed to match. The API matches by set membership — index `organizations` by `ein`, never pair them positionally.    |
+| **Duplicates**     | Sent as supplied, because each one is billable. A repeated EIN still returns one record. Pass `{ dedupe: true }` to collapse. |
+| **Empty input**    | Throws `PactmanValidationError` locally.                                                                                      |
+| **One bad EIN**    | The whole batch is rejected locally, identifying the failing index. Nothing is sent.                                          |
+| **No matches**     | A batch where nothing matched is an error; a batch where some matched is a 200 with the rest in `notFoundEins`.               |
 
 ```ts
 // Opt in to deduplication.
 await client.nonprofits.checkBulk(eins, { dedupe: true });
+
+// Index by EIN — the pairing that always holds.
+const byEin = new Map(result.organizations.map(org => [org.ein, org]));
 ```
+
+## Usage and billing cycle
+
+`nonprofit_check_count`, surfaced as `result.checkCount`, is the number of checks your account has consumed **so far in the current billing cycle**, including the request that returned it. It resets when a new cycle starts.
+
+It is not the size of the request you just made. A bulk call for five EINs does not return `5`.
+
+```ts
+const before = await client.nonprofits.check(ein);
+const after = await client.nonprofits.checkBulk(eins);
+
+after.checkCount; // cycle total, e.g. 1_284
+after.checkCount - before.checkCount; // what these requests actually consumed
+```
+
+EINs with no matching record are not billed, so a delta can be smaller than the batch you sent. Read the number the API reports rather than reconstructing usage from your input.
 
 ## Inspecting source-specific findings
 
@@ -417,20 +440,49 @@ All public members carry TSDoc, so editor autocomplete and hover documentation w
 
 ## Examples
 
-Runnable examples live in [`examples/`](./examples). They read `PACTMAN_API_KEY` from the environment and contain no credentials.
+Thirty numbered, runnable examples live in [`examples/`](./examples), covering secure setup, every source on the response, each error and edge case, bulk semantics, and five end-to-end workflows. They read `PACTMAN_API_KEY` from the environment and contain no credentials. [`examples/README.md`](./examples/README.md) indexes them.
 
 ```bash
-npm run build
+npm run build   # the examples import the package by name
+
+PACTMAN_API_KEY=your_key node examples/ex-01-secure-client-init.mjs
+PACTMAN_API_KEY=your_key node examples/ex-03-identity-lookup.mjs 41-1787097
 PACTMAN_API_KEY=your_key npm run example:quickstart
-PACTMAN_API_KEY=your_key npm run example:bulk
-PACTMAN_API_KEY=your_key npm run example:errors
 ```
 
-CI runs all three against a local mock server on every push:
+Examples for scenarios a live API will not produce on request — a revoked exemption, an OFAC match, an HTTP 429, a response carrying a field newer than this SDK — run against a bundled fixture server they start themselves.
+
+CI runs every example on every push:
 
 ```bash
-npm run examples:smoke
+npm run examples:smoke                     # pass/fail
+EXAMPLES_VERBOSE=1 npm run examples:smoke  # with output
+npm run examples:smoke -- ex-22 ex-23      # a subset
 ```
+
+## Verifying against a live deployment
+
+The examples above prove the SDK against a fixture server its own authors wrote. `scripts/smoke-live.mjs` proves it against a real deployment: every claim examples ex-01 through ex-30 make about the live API — the envelope shape, the error taxonomy, each source projection, bulk semantics, freshness dates, and what actually goes on the wire — has a check there.
+
+Most of those checks cost nothing. A claim about the shape of a record is answered by a record already fetched, and a claim about local validation is answered without sending anything, so only a handful of checks spend quota. `--dry-run` prints the exact plan and its cost, and nothing is sent until you confirm it.
+
+```bash
+PACTMAN_API_KEY=your_key npm run smoke:live -- --dry-run
+PACTMAN_API_KEY=your_key npm run smoke:live -- --ein 41-1787097 --eins 41-1787097,996589560
+```
+
+|                                             |                                                                                         |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `--base-url <url>`                          | Host to test. Defaults to production, or `PACTMAN_BASE_URL`.                            |
+| `--api-key-env <NAME>`                      | Environment variable holding the key. Default `PACTMAN_API_KEY`.                        |
+| `--api-key <value>`                         | The key inline. Visible in shell history and the process list — prefer `--api-key-env`. |
+| `--ein`, `--eins`, `--missing-ein`          | Test data for this deployment.                                                          |
+| `--max-checks <n>`                          | Ceiling on billable checks. Default 25.                                                 |
+| `--yes` / `--dry-run`                       | Skip the prompt (required when stdin is not a TTY) / plan only.                         |
+| `--include-timeout`, `--include-rate-limit` | Opt-in probes. The rate-limit one deliberately bursts until it gets a 429.              |
+| `--json`, `--verbose`                       | Output control.                                                                         |
+
+Credentials never reach the output: every value it was given is redacted from logs, errors and the JSON report. Exit code is `1` if any check failed, `2` on a usage error. Run `npm run smoke:live -- --help` for the full list.
 
 ## Support
 

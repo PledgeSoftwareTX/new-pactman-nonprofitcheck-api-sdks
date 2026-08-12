@@ -83,8 +83,10 @@ export class NonprofitsResource {
    *
    * Every EIN is normalized and validated before anything is sent; if any one
    * fails, the whole call throws {@link PactmanValidationError} identifying the
-   * offending index, and no request is made. Order is preserved and duplicates
-   * are kept unless `dedupe` is set.
+   * offending index, and no request is made. EINs are sent in the order supplied
+   * and duplicates are kept unless `dedupe` is set — but the API matches by set
+   * membership, so the response is not ordered to match and a repeated EIN comes
+   * back once. Index `organizations` by `ein` rather than pairing positionally.
    *
    * EINs the API has no record for are not an error: they arrive as HTTP 200
    * with the missing values in `notFoundEins`.

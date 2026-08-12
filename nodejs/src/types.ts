@@ -125,14 +125,26 @@ export interface ApiEnvelope<TData> {
   data?: TData;
   /** Server-side processing time in milliseconds. */
   timeTaken?: number | null;
-  /** Checks this request consumed from the account's quota. */
+  /**
+   * Checks the account has consumed so far in the current billing cycle,
+   * including this request. It resets when a new cycle begins.
+   *
+   * This is a running total, not the size of the request you just made. To learn
+   * what one request cost, compare this value across two responses.
+   */
   nonprofit_check_count?: number | null;
   [key: string]: unknown;
 }
 
 /** Fields shared by every result this SDK returns. */
 export interface PactmanResult<TRaw> {
-  /** Checks this request consumed from the account's quota, when reported. */
+  /**
+   * `nonprofit_check_count` from the envelope: checks consumed so far in the
+   * current billing cycle, including this request, resetting each cycle.
+   *
+   * Not the size of this request. Take the delta between two responses if you
+   * need that, and read this one as a usage gauge.
+   */
   checkCount: number | null;
   /** Server-side processing time in milliseconds, when reported. */
   timeTakenMs: number | null;
@@ -157,7 +169,10 @@ export interface SingleCheckResult extends PactmanResult<ApiEnvelope<Nonprofit |
 
 /** The result of {@link import('./client.js').NonprofitsResource.checkBulk}. */
 export interface BulkCheckResult extends PactmanResult<ApiEnvelope<Nonprofit[] | null>> {
-  /** Organizations the API matched, in the order it returned them. */
+  /**
+   * Organizations the API matched, in the order it returned them — which is not
+   * guaranteed to follow the order you supplied. Index by `ein`.
+   */
   organizations: Nonprofit[];
   /**
    * EINs the API reported no record for, collected from `errors`.

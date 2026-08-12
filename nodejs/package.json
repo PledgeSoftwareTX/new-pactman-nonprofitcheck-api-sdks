@@ -62,7 +62,10 @@
     "example:quickstart": "node examples/quickstart.mjs",
     "example:bulk": "node examples/bulk.mjs",
     "example:errors": "node examples/error-handling.mjs",
+    "example:onboarding": "node examples/ex-26-onboarding-workflow.mjs",
     "examples:smoke": "node scripts/run-examples-against-mock.mjs",
+    "smoke:live": "node scripts/smoke-live.mjs",
+    "mock": "node scripts/mock-server.mjs",
     "version": "node scripts/sync-version.mjs && git add src/version.ts",
     "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
