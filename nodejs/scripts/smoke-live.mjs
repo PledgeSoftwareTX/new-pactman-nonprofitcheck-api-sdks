@@ -16,12 +16,19 @@
  * anything is sent, and `--max-checks` is a hard ceiling.
  *
  * Usage
- *   PACTMAN_API_KEY=... node scripts/smoke-live.mjs --base-url https://entities.pactman.org
- *   PACTMAN_API_KEY=... node scripts/smoke-live.mjs --ein 41-1787097 --eins 41-1787097,996589560
+ *   node scripts/smoke-live.mjs
+ *   node scripts/smoke-live.mjs --ein 41-1787097 --eins 41-1787097,996589560
+ *
+ * The bare form is the sign-off run: production, the sign-off EINs, the key from
+ * `nodejs/.env` or the environment. Every flag is an override for a case that
+ * differs from it.
  *
  * Run `node scripts/smoke-live.mjs --help` for every option.
  */
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import * as sdk from '@pactmandev/nonprofit-check-plus';
 import {
@@ -58,7 +65,29 @@ import {
   normalizeEins,
   supportedEnvironments,
 } from '@pactmandev/nonprofit-check-plus';
+import {
+  formatChanges,
+  schemaDiff,
+  signatureOf,
+  summarizeChanges,
+  typeDiff,
+} from './contract.mjs';
 import { KNOWN_NONPROFIT_FIELDS } from './fixtures.mjs';
+
+/**
+ * The organizations this harness checks when it is given none.
+ *
+ * Chosen so the sign-off run takes no arguments: a primary subject with a
+ * record, a second one to give the bulk order and duplicate probes something to
+ * work with, and a well-formed EIN with no record for the not-found and
+ * partial-success paths. They are the test data in the test plan, and the first
+ * two are reachable on a free-tier key, so a free key gets as far as a free key
+ * can. Pass --ein / --eins / --missing-ein for any deployment where these are
+ * not the right subjects.
+ */
+const DEFAULT_EIN = '996589560';
+const DEFAULT_BULK_EINS = ['996589560', '680343125'];
+const DEFAULT_MISSING_EIN = '999999999';
 
 const USAGE = `
 Live contract smoke test for @pactmandev/nonprofit-check-plus.
@@ -70,6 +99,9 @@ Target
                             or PACTMAN_BASE_URL when set.
 
 Credentials  (never passed on the command line if you can avoid it)
+  nodejs/.env is read if present, so the key need not be exported for every run.
+  A variable already in the environment always wins over the file.
+
   --api-key-env <NAME>      Environment variable holding the key.
                             Default: PACTMAN_API_KEY
   --api-key <value>         The key itself. Visible in your shell history and in
@@ -77,11 +109,22 @@ Credentials  (never passed on the command line if you can avoid it)
   --invalid-api-key <value> Key expected to be rejected, for the 401 check.
                             Default: a synthetic key that cannot be valid.
 
-Test data
+Test data  (the defaults are the sign-off EINs — no flag needed for a normal run)
   --ein <ein>               An EIN with a record on this deployment.
+                            Default: ${DEFAULT_EIN}, or PACTMAN_SMOKE_EIN
   --eins <a,b,c>            EINs for the bulk checks. At least two enables the
                             ordering and duplicate probes.
+                            Default: ${DEFAULT_BULK_EINS.join(',')}, or PACTMAN_SMOKE_EINS
   --missing-ein <ein>       A well-formed EIN expected to have NO record.
+                            Default: ${DEFAULT_MISSING_EIN}, or PACTMAN_SMOKE_MISSING_EIN
+
+Response contract
+  --contract-baseline <p>   Recorded response shapes to check this run against.
+                            Default: scripts/contract-baseline.json
+  --update-contract         Re-record an existing baseline from this run instead
+                            of checking against it. Do this only once a change in
+                            the API is understood and intended. Not needed the
+                            first time: a run with nothing on file records it.
 
 Budget and safety
   --max-checks <n>          Abort before exceeding this many billable checks.
@@ -109,7 +152,9 @@ function parseArgs(argv) {
     invalidApiKey: 'pactman-smoke-test-invalid-key',
     ein: process.env.PACTMAN_SMOKE_EIN ?? null,
     eins: process.env.PACTMAN_SMOKE_EINS?.split(',') ?? null,
-    missingEin: process.env.PACTMAN_SMOKE_MISSING_EIN ?? '999999999',
+    missingEin: process.env.PACTMAN_SMOKE_MISSING_EIN ?? DEFAULT_MISSING_EIN,
+    contractBaseline: process.env.PACTMAN_CONTRACT_BASELINE ?? null,
+    updateContract: false,
     maxChecks: 25,
     yes: false,
     dryRun: false,
@@ -126,6 +171,7 @@ function parseArgs(argv) {
     ['--invalid-api-key', 'invalidApiKey'],
     ['--ein', 'ein'],
     ['--missing-ein', 'missingEin'],
+    ['--contract-baseline', 'contractBaseline'],
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -158,6 +204,8 @@ function parseArgs(argv) {
       options.yes = true;
     } else if (arg === '--dry-run') {
       options.dryRun = true;
+    } else if (arg === '--update-contract') {
+      options.updateContract = true;
     } else if (arg === '--include-timeout') {
       options.includeTimeout = true;
     } else if (arg === '--include-rate-limit') {
@@ -172,6 +220,44 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+// --- environment file -------------------------------------------------------
+
+/**
+ * Loads `nodejs/.env`, so the key and any standing overrides live in a file
+ * rather than in the shell for every run. The file is gitignored.
+ *
+ * A variable already in the environment wins: exporting one for a single run
+ * must not be silently overridden by a file someone set up months ago.
+ */
+function loadEnvFile() {
+  const path = fileURLToPath(new URL('../.env', import.meta.url));
+
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  const names = new Set();
+
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+
+    if (!match) {
+      continue;
+    }
+
+    const [, name, rawValue] = match;
+
+    if (process.env[name] !== undefined) {
+      continue;
+    }
+
+    process.env[name] = rawValue.trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
+    names.add(name);
+  }
+
+  return { path, names };
 }
 
 // --- secret handling --------------------------------------------------------
@@ -193,6 +279,17 @@ function redact(value) {
 
 function say(...parts) {
   console.log(parts.map(part => redact(String(part))).join(' '));
+}
+
+/** Where the credential came from, named precisely enough to correct. */
+function keySource(options, envFile) {
+  if (options.apiKeyOnArgv) {
+    return '--api-key';
+  }
+
+  return envFile?.names.has(options.apiKeyEnv)
+    ? `${options.apiKeyEnv} in ${basename(envFile.path)}`
+    : options.apiKeyEnv;
 }
 
 // --- the runner -------------------------------------------------------------
@@ -292,6 +389,23 @@ class Runner {
       });
 
       return null;
+    }
+  }
+
+  /**
+   * Keeps the first successful bulk response for the checks that read one.
+   *
+   * `bulk partial success` is the better subject — its envelope is the only one
+   * carrying the item-level errors a batch with a miss returns — but it is
+   * unreachable on a key whose bulk EINs are allowlisted, since such a key
+   * refuses the whole batch. Capturing here rather than in that one check means
+   * the duplicate probe's response stands in when it has to, instead of four
+   * later checks skipping for want of any bulk response at all.
+   */
+  captureBulk(result, submitted) {
+    if (!this.bulkResult) {
+      this.bulkResult = result;
+      this.bulkSubmitted = submitted;
     }
   }
 
@@ -1672,8 +1786,7 @@ function bulkChecks(options, eins) {
       }
 
       runner.observeCycleCount(result.checkCount);
-      runner.bulkResult = result;
-      runner.bulkSubmitted = submitted;
+      runner.captureBulk(result, submitted);
 
       assert(
         result.status === 200,
@@ -1720,6 +1833,7 @@ function bulkChecks(options, eins) {
         const result = await runner.client.nonprofits.checkBulk(duplicateProbe);
 
         runner.observeCycleCount(result.checkCount);
+        runner.captureBulk(result, duplicateProbe);
 
         const requested = duplicateProbe.map(value => normalizeEin(value));
         const returnedEins = result.organizations.map(org => org.ein);
@@ -1857,6 +1971,284 @@ function bulkChecks(options, eins) {
   });
 
   return checks;
+}
+
+// --- checks: the raw response contract --------------------------------------
+
+/**
+ * Four checks that hold the raw JSON this run received against a recorded
+ * baseline: the schema and the types of the single-check response, and the same
+ * two for bulk.
+ *
+ * Everything else in this file asserts what the SDK does with a response. These
+ * assert that the response itself has not moved — a field the API stopped
+ * sending, one it started sending, one that changed from a boolean to a string
+ * or from `M/D/YYYY h:mm:ss AM` to ISO. None of it is knowable from the SDK's
+ * own types, which are permissive by design so a server-side change cannot break
+ * deserialization; this is where such a change is meant to become visible.
+ *
+ * Free. Both responses were already fetched and paid for by the checks above.
+ *
+ * The first run against a deployment has nothing to compare to, so it records
+ * what it saw and says so; every run after that is a comparison. A fifth entry
+ * writes the file when there is something new to write, and stands down when
+ * there is not.
+ *
+ * The baseline holds shapes only — path, type and value format, never a value —
+ * so it is safe to commit and a failure is safe to print. See `contract.mjs`.
+ */
+function contractChecks(options) {
+  const section = 'contract';
+  const baselinePath = options.contractBaseline
+    ? resolve(options.contractBaseline)
+    : fileURLToPath(new URL('./contract-baseline.json', import.meta.url));
+
+  /** Read once, on the first check that needs it. */
+  let baseline;
+  let baselineError = null;
+
+  function loadBaseline() {
+    if (baseline === undefined) {
+      baseline = null;
+
+      if (existsSync(baselinePath)) {
+        try {
+          baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+        } catch (error) {
+          baselineError = `${basename(baselinePath)} is not readable JSON: ${error.message}`;
+        }
+      }
+    }
+
+    return baseline;
+  }
+
+  /** Signatures this run observed, by endpoint. Built once, read by both checks. */
+  const observed = {};
+
+  function observe(runner, kind) {
+    if (observed[kind] === undefined) {
+      const source =
+        kind === 'single'
+          ? {
+              raw: runner.singleResult?.raw,
+              subject: { ein: runner.singleResult?.nonprofit?.ein ?? null },
+              missing: 'the single check did not return a response',
+            }
+          : {
+              raw: runner.bulkResult?.raw,
+              subject: { eins: (runner.bulkSubmitted ?? []).map(value => normalizeEin(value)) },
+              missing: runner.freeTierKey
+                ? 'this key restricts bulk EINs to an allowlist, so no bulk response was returned'
+                : 'the bulk check did not return a response',
+            };
+
+      observed[kind] =
+        source.raw === undefined
+          ? { missing: source.missing }
+          : { subject: source.subject, signature: signatureOf(source.raw) };
+    }
+
+    return observed[kind];
+  }
+
+  /**
+   * A baseline recorded against a different organization, or a different batch,
+   * describes a different record. Comparing the two would report data variation
+   * as API drift, so the checks stand down instead.
+   */
+  function subjectMismatch(recorded, subject) {
+    if (subject.ein && recorded.ein && recorded.ein !== subject.ein) {
+      return `the baseline was recorded for EIN ${recorded.ein}, this run used ${subject.ein}`;
+    }
+
+    if (subject.eins && recorded.eins && recorded.eins.join(',') !== subject.eins.join(',')) {
+      return (
+        `the baseline was recorded for EINs ${recorded.eins.join(', ')}, ` +
+        `this run used ${subject.eins.join(', ')}`
+      );
+    }
+
+    return null;
+  }
+
+  /** Endpoints whose signature has to be written out at the end of the run. */
+  const pending = new Set();
+
+  let announcedTarget = false;
+
+  /**
+   * Both checks on an endpoint do the same work along different axes: signature
+   * of what arrived, held against the recorded one by `diff`.
+   *
+   * With nothing recorded for this endpoint yet, there is nothing to hold it
+   * against, so this run becomes the baseline. That is the whole first-run
+   * ceremony: run it, and from the next run on the comparison is live. Only
+   * re-recording over an existing baseline needs `--update-contract`, because
+   * that one discards evidence.
+   */
+  function against({ kind, name, diff, describe }) {
+    return {
+      section,
+      name,
+      cost: 0,
+      body(runner) {
+        const current = observe(runner, kind);
+
+        if (current.missing) {
+          return { status: 'skip', detail: current.missing };
+        }
+
+        const paths = Object.keys(current.signature).length;
+        const stored = loadBaseline();
+
+        if (baselineError) {
+          throw new Error(baselineError);
+        }
+
+        const recorded = stored?.[kind]?.signature ? stored[kind] : null;
+
+        if (!recorded || options.updateContract) {
+          pending.add(kind);
+
+          return {
+            detail: recorded
+              ? `${paths} paths re-recorded over the previous baseline`
+              : `${paths} paths recorded — the next run checks against them`,
+            data: { paths, recorded: true },
+          };
+        }
+
+        const mismatch = subjectMismatch(recorded, current.subject);
+
+        if (mismatch) {
+          return { status: 'skip', detail: `${mismatch} — the two describe different records` };
+        }
+
+        const recordedBaseUrl = recorded.baseUrl ?? stored.baseUrl;
+
+        if (!announcedTarget && recordedBaseUrl && recordedBaseUrl !== runner.client.baseUrl) {
+          announcedTarget = true;
+          runner.note(
+            name,
+            `the baseline was recorded against ${recordedBaseUrl}; this run targeted ${runner.client.baseUrl}, ` +
+              'so a difference may be between deployments rather than over time',
+          );
+        }
+
+        const result = diff(recorded.signature, current.signature);
+
+        assert(
+          result.total === 0,
+          `the live ${kind} response no longer matches ${basename(baselinePath)} — ` +
+            `${summarizeChanges(result.changes)}\n${formatChanges(result.changes)}\n` +
+            '      re-record with --update-contract once the change is understood and intended',
+        );
+
+        return {
+          detail: `${describe(paths)} · ${baselineAge(recorded, stored)}`,
+          data: { paths, recordedAt: recorded.recordedAt ?? stored.recordedAt ?? null },
+        };
+      },
+    };
+  }
+
+  const checks = [
+    against({
+      kind: 'single',
+      name: 'single response schema',
+      diff: schemaDiff,
+      describe: paths => `${paths} paths, none added or removed`,
+    }),
+    against({
+      kind: 'single',
+      name: 'single response types',
+      diff: typeDiff,
+      describe: paths => `${paths} paths carry the recorded types and value formats`,
+    }),
+    against({
+      kind: 'bulk',
+      name: 'bulk response schema',
+      diff: schemaDiff,
+      describe: paths => `${paths} paths, none added or removed`,
+    }),
+    against({
+      kind: 'bulk',
+      name: 'bulk response types',
+      diff: typeDiff,
+      describe: paths => `${paths} paths carry the recorded types and value formats`,
+    }),
+  ];
+
+  checks.push({
+    section,
+    name: 'baseline',
+    cost: 0,
+    body(runner) {
+      const previous = loadBaseline() ?? {};
+      const written = ['single', 'bulk'].filter(
+        kind => pending.has(kind) && observed[kind]?.signature,
+      );
+
+      if (written.length === 0) {
+        return {
+          status: 'skip',
+          detail: `${basename(baselinePath)} already covers what this run observed`,
+        };
+      }
+
+      // Only what this run recorded is rewritten. An endpoint that was checked,
+      // or that this run never reached, keeps the shape already on file — a
+      // failed comparison must not quietly become the new baseline.
+      const recordFor = kind =>
+        written.includes(kind)
+          ? {
+              recordedAt: new Date().toISOString(),
+              baseUrl: runner.client.baseUrl,
+              sdkVersion: VERSION,
+              ...observed[kind].subject,
+              signature: observed[kind].signature,
+            }
+          : (previous[kind] ?? null);
+
+      const kept = ['single', 'bulk'].filter(
+        kind => !written.includes(kind) && previous[kind]?.signature,
+      );
+
+      writeFileSync(
+        baselinePath,
+        `${JSON.stringify(
+          {
+            note:
+              'Shape of the live API responses: path, JSON type and value format, no values. ' +
+              'Recorded on first run; re-record with: node scripts/smoke-live.mjs --update-contract',
+            single: recordFor('single'),
+            bulk: recordFor('bulk'),
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      return {
+        detail:
+          `${written.join(' and ')} written to ${basename(baselinePath)} — commit it` +
+          (kept.length > 0 ? ` · ${kept.join(' and ')} left as recorded` : ''),
+        data: { written, kept },
+      };
+    },
+  });
+
+  return checks;
+}
+
+/** How old the recorded baseline is, for the detail line. */
+function baselineAge(recorded, stored) {
+  const recordedAt = Date.parse(recorded.recordedAt ?? stored.recordedAt ?? '');
+
+  return Number.isNaN(recordedAt)
+    ? 'baseline of unknown age'
+    : `baseline ${ageInDays(recordedAt)}d old`;
 }
 
 // --- checks: rechecking the same record (ex-28..ex-30) ----------------------
@@ -2198,6 +2590,7 @@ function buildPlan(options, ein, eins, apiKey, baseUrl) {
     ...sourceChecks(),
     ...forwardCompatibilityChecks(),
     ...bulkChecks(options, eins),
+    ...contractChecks(options),
     ...recheckChecks(ein),
     ...wireChecks(apiKey),
     ...optionalProbes(options, ein),
@@ -2206,13 +2599,15 @@ function buildPlan(options, ein, eins, apiKey, baseUrl) {
 
 // --- main -------------------------------------------------------------------
 
+const envFile = loadEnvFile();
 const options = parseArgs(process.argv.slice(2));
 
 const apiKey = options.apiKey ?? process.env[options.apiKeyEnv];
 
 if (!apiKey) {
   console.error(
-    `No API key. Set ${options.apiKeyEnv}, or pass --api-key-env <NAME> to name a different variable.`,
+    `No API key. Put ${options.apiKeyEnv} in nodejs/.env or export it, ` +
+      'or pass --api-key-env <NAME> to name a different variable.',
   );
   process.exit(2);
 }
@@ -2228,8 +2623,11 @@ if (options.apiKeyOnArgv) {
 }
 
 const baseUrl = options.baseUrl ?? baseUrlForEnvironment(DEFAULT_ENVIRONMENT);
-const ein = options.ein ?? options.eins?.[0] ?? '41-1787097';
-const eins = options.eins ?? [ein];
+const ein = options.ein ?? options.eins?.[0] ?? DEFAULT_EIN;
+
+// Naming a single subject narrows the bulk probes to it; naming neither runs the
+// sign-off pair, which is what makes the bare command a complete run.
+const eins = options.eins ?? (options.ein ? [options.ein] : DEFAULT_BULK_EINS);
 
 for (const value of [ein, ...eins, options.missingEin]) {
   try {
@@ -2246,7 +2644,7 @@ const billableChecks = plan.filter(check => check.cost > 0).length;
 
 if (!options.json) {
   say(`Target        ${baseUrl}`);
-  say(`Key           from ${options.apiKeyOnArgv ? '--api-key' : options.apiKeyEnv} (${apiKey.length} characters, never printed)`);
+  say(`Key           from ${keySource(options, envFile)} (${apiKey.length} characters, never printed)`);
   say(`Known EIN     ${ein}`);
   say(`Bulk EINs     ${eins.join(', ')}`);
   say(`Missing EIN   ${options.missingEin}`);

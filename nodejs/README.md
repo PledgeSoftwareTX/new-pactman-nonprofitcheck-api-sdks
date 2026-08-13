@@ -38,7 +38,6 @@ Official Node.js SDK for the **Pactman Nonprofit Check Plus API**. Look up US no
   - [Errors and edge cases](#errors-and-edge-cases) — EX-15, EX-16, EX-22 to EX-25
   - [Bulk](#bulk) — EX-17 to EX-21
   - [End-to-end workflows](#end-to-end-workflows) — EX-26 to EX-30
-- [Verifying against a live deployment](#verifying-against-a-live-deployment)
 - [Support](#support)
 - [License](#license)
 
@@ -1499,30 +1498,6 @@ for (const entry of portfolio) {
 ### One thing every example repeats
 
 The SDK reports what the API returned. It produces no `approved`, `eligible` or `safe` verdict, and no boolean summarizing a source the API does not itself express as a boolean. Whether an organization qualifies for a donation, a grant, a match or a payout is a determination for your own legal, compliance and risk policy — which is why the routing logic in these examples lives in the example, never in the library.
-
-## Verifying against a live deployment
-
-The examples above prove the SDK against a fixture server its own authors wrote. `scripts/smoke-live.mjs` proves it against a real deployment: every claim examples ex-01 through ex-30 make about the live API — the envelope shape, the error taxonomy, each source projection, bulk semantics, freshness dates, and what actually goes on the wire — has a check there.
-
-Most of those checks cost nothing. A claim about the shape of a record is answered by a record already fetched, and a claim about local validation is answered without sending anything, so only a handful of checks spend quota. `--dry-run` prints the exact plan and its cost, and nothing is sent until you confirm it.
-
-```bash
-PACTMAN_API_KEY=your_key npm run smoke:live -- --dry-run
-PACTMAN_API_KEY=your_key npm run smoke:live -- --ein 41-1787097 --eins 41-1787097,996589560
-```
-
-|                                             |                                                                                         |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `--base-url <url>`                          | Host to test. Defaults to production, or `PACTMAN_BASE_URL`.                            |
-| `--api-key-env <NAME>`                      | Environment variable holding the key. Default `PACTMAN_API_KEY`.                        |
-| `--api-key <value>`                         | The key inline. Visible in shell history and the process list — prefer `--api-key-env`. |
-| `--ein`, `--eins`, `--missing-ein`          | Test data for this deployment.                                                          |
-| `--max-checks <n>`                          | Ceiling on billable checks. Default 25.                                                 |
-| `--yes` / `--dry-run`                       | Skip the prompt (required when stdin is not a TTY) / plan only.                         |
-| `--include-timeout`, `--include-rate-limit` | Opt-in probes. The rate-limit one deliberately bursts until it gets a 429.              |
-| `--json`, `--verbose`                       | Output control.                                                                         |
-
-Credentials never reach the output: every value it was given is redacted from logs, errors and the JSON report. Exit code is `1` if any check failed, `2` on a usage error. Run `npm run smoke:live -- --help` for the full list.
 
 ## Support
 

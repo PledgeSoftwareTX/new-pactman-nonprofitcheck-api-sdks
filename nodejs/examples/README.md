@@ -107,7 +107,7 @@ instead. It spends real quota, so it prints its plan and asks first.
 PACTMAN_API_KEY=your_key npm run smoke:live -- --base-url https://entities.pactman.org --dry-run
 ```
 
-See [Verifying against a live deployment](../README.md#verifying-against-a-live-deployment).
+Run `npm run smoke:live -- --help` for every option.
 
 ## Shared helpers
 
