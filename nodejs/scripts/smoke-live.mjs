@@ -11,23 +11,27 @@
  * fetched, and a claim about local validation is answered without sending
  * anything. Only a handful of checks need their own round trip.
  *
+ * The report is grouped the same way: one heading per example file, and under it
+ * the checks that stand behind what that file claims. Checks run in dependency
+ * order rather than example order — a record has to be fetched before anything
+ * can be asserted about it, and the log of what went on the wire is only
+ * complete at the end — so nothing prints until the run is over. The ticker is
+ * what says it is alive in the meantime.
+ *
  * IT SPENDS REAL QUOTA. Every billable check is charged against the account
- * behind the key you supply. The planned cost is printed and confirmed before
- * anything is sent, and `--max-checks` is a hard ceiling.
+ * behind the key. There is nothing to configure and nothing to opt into: one
+ * command runs the whole plan, the disruptive probes included, and what it will
+ * cost is printed as it starts.
  *
  * Usage
  *   node scripts/smoke-live.mjs
- *   node scripts/smoke-live.mjs --ein 41-1787097 --eins 41-1787097,996589560
  *
- * The bare form is the sign-off run: production, the sign-off EINs, the key from
- * `nodejs/.env` or the environment. Every flag is an override for a case that
- * differs from it.
- *
- * Run `node scripts/smoke-live.mjs --help` for every option.
+ * That is the whole interface. The key is read from PACTMAN_API_KEY, in the
+ * environment or in `nodejs/.env`; PACTMAN_BASE_URL aims the run at a deployment
+ * other than production, which is how it is run against the mock server.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import * as sdk from '@pactmandev/nonprofit-check-plus';
@@ -75,152 +79,26 @@ import {
 import { KNOWN_NONPROFIT_FIELDS } from './fixtures.mjs';
 
 /**
- * The organizations this harness checks when it is given none.
+ * The organizations this harness checks.
  *
- * Chosen so the sign-off run takes no arguments: a primary subject with a
- * record, a second one to give the bulk order and duplicate probes something to
- * work with, and a well-formed EIN with no record for the not-found and
- * partial-success paths. They are the test data in the test plan, and the first
- * two are reachable on a free-tier key, so a free key gets as far as a free key
- * can. Pass --ein / --eins / --missing-ein for any deployment where these are
- * not the right subjects.
+ * A primary subject with a record, a second one to give the bulk order and
+ * duplicate probes something to work with, and a well-formed EIN with no record
+ * for the not-found and partial-success paths. They are the test data in the
+ * test plan, and the first two are reachable on a free-tier key, so a free key
+ * gets as far as a free key can.
  */
-const DEFAULT_EIN = '996589560';
-const DEFAULT_BULK_EINS = ['996589560', '680343125'];
-const DEFAULT_MISSING_EIN = '999999999';
+const EIN = '996589560';
+const BULK_EINS = ['996589560', '680343125'];
+const MISSING_EIN = '999999999';
 
-const USAGE = `
-Live contract smoke test for @pactmandev/nonprofit-check-plus.
+/** The variable the credential is read from, in the environment or in `.env`. */
+const API_KEY_ENV = 'PACTMAN_API_KEY';
 
-  node scripts/smoke-live.mjs [options]
+/** Sent where a key is meant to be rejected. Synthetic, so it cannot be valid. */
+const INVALID_API_KEY = 'pactman-smoke-test-invalid-key';
 
-Target
-  --base-url <url>          Host to test. Defaults to the SDK's ${DEFAULT_ENVIRONMENT} URL,
-                            or PACTMAN_BASE_URL when set.
-
-Credentials  (never passed on the command line if you can avoid it)
-  nodejs/.env is read if present, so the key need not be exported for every run.
-  A variable already in the environment always wins over the file.
-
-  --api-key-env <NAME>      Environment variable holding the key.
-                            Default: PACTMAN_API_KEY
-  --api-key <value>         The key itself. Visible in your shell history and in
-                            the process list — prefer --api-key-env.
-  --invalid-api-key <value> Key expected to be rejected, for the 401 check.
-                            Default: a synthetic key that cannot be valid.
-
-Test data  (the defaults are the sign-off EINs — no flag needed for a normal run)
-  --ein <ein>               An EIN with a record on this deployment.
-                            Default: ${DEFAULT_EIN}, or PACTMAN_SMOKE_EIN
-  --eins <a,b,c>            EINs for the bulk checks. At least two enables the
-                            ordering and duplicate probes.
-                            Default: ${DEFAULT_BULK_EINS.join(',')}, or PACTMAN_SMOKE_EINS
-  --missing-ein <ein>       A well-formed EIN expected to have NO record.
-                            Default: ${DEFAULT_MISSING_EIN}, or PACTMAN_SMOKE_MISSING_EIN
-
-Response contract
-  --contract-baseline <p>   Recorded response shapes to check this run against.
-                            Default: scripts/contract-baseline.json
-  --update-contract         Re-record an existing baseline from this run instead
-                            of checking against it. Do this only once a change in
-                            the API is understood and intended. Not needed the
-                            first time: a run with nothing on file records it.
-
-Budget and safety
-  --max-checks <n>          Abort before exceeding this many billable checks.
-                            Default: 25
-  --yes                     Skip the confirmation prompt. Required when stdin is
-                            not a TTY.
-  --dry-run                 Print the plan and its cost, then exit. Sends nothing.
-
-Optional probes (off by default — they are disruptive or costly)
-  --include-timeout         Force a timeout and a cancellation.
-  --include-rate-limit      Burst requests until the server answers 429.
-
-Output
-  --json                    Emit a machine-readable report on stdout.
-  --verbose                 Include response detail for each check.
-`;
-
-// --- argument parsing -------------------------------------------------------
-
-function parseArgs(argv) {
-  const options = {
-    baseUrl: process.env.PACTMAN_BASE_URL ?? null,
-    apiKeyEnv: 'PACTMAN_API_KEY',
-    apiKey: null,
-    invalidApiKey: 'pactman-smoke-test-invalid-key',
-    ein: process.env.PACTMAN_SMOKE_EIN ?? null,
-    eins: process.env.PACTMAN_SMOKE_EINS?.split(',') ?? null,
-    missingEin: process.env.PACTMAN_SMOKE_MISSING_EIN ?? DEFAULT_MISSING_EIN,
-    contractBaseline: process.env.PACTMAN_CONTRACT_BASELINE ?? null,
-    updateContract: false,
-    maxChecks: 25,
-    yes: false,
-    dryRun: false,
-    includeTimeout: false,
-    includeRateLimit: false,
-    json: false,
-    verbose: false,
-    apiKeyOnArgv: false,
-  };
-
-  const withValue = new Map([
-    ['--base-url', 'baseUrl'],
-    ['--api-key-env', 'apiKeyEnv'],
-    ['--invalid-api-key', 'invalidApiKey'],
-    ['--ein', 'ein'],
-    ['--missing-ein', 'missingEin'],
-    ['--contract-baseline', 'contractBaseline'],
-  ]);
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    const next = () => {
-      const value = argv[index + 1];
-
-      if (value === undefined || value.startsWith('--')) {
-        throw new Error(`${arg} requires a value.`);
-      }
-
-      index += 1;
-
-      return value;
-    };
-
-    if (arg === '--help' || arg === '-h') {
-      console.log(USAGE);
-      process.exit(0);
-    } else if (withValue.has(arg)) {
-      options[withValue.get(arg)] = next();
-    } else if (arg === '--api-key') {
-      options.apiKey = next();
-      options.apiKeyOnArgv = true;
-    } else if (arg === '--eins') {
-      options.eins = next().split(',');
-    } else if (arg === '--max-checks') {
-      options.maxChecks = Number(next());
-    } else if (arg === '--yes' || arg === '-y') {
-      options.yes = true;
-    } else if (arg === '--dry-run') {
-      options.dryRun = true;
-    } else if (arg === '--update-contract') {
-      options.updateContract = true;
-    } else if (arg === '--include-timeout') {
-      options.includeTimeout = true;
-    } else if (arg === '--include-rate-limit') {
-      options.includeRateLimit = true;
-    } else if (arg === '--json') {
-      options.json = true;
-    } else if (arg === '--verbose') {
-      options.verbose = true;
-    } else {
-      throw new Error(`Unknown option "${arg}". Run with --help.`);
-    }
-  }
-
-  return options;
-}
+/** Ceiling on the burst the rate-limit probe is allowed to send. */
+const RATE_LIMIT_ATTEMPTS = 10;
 
 // --- environment file -------------------------------------------------------
 
@@ -282,14 +160,131 @@ function say(...parts) {
 }
 
 /** Where the credential came from, named precisely enough to correct. */
-function keySource(options, envFile) {
-  if (options.apiKeyOnArgv) {
-    return '--api-key';
+function keySource(envFile) {
+  return envFile?.names.has(API_KEY_ENV)
+    ? `${API_KEY_ENV} in ${basename(envFile.path)}`
+    : API_KEY_ENV;
+}
+
+// --- the examples this harness answers for ----------------------------------
+
+const EXAMPLES_DIR = new URL('../examples/', import.meta.url);
+
+/**
+ * The checks that are not answering for an example file. The response contract
+ * is the API's own shape held against a recording of it — drift there is not
+ * something any example claims, and it gets its own heading rather than being
+ * filed under one.
+ */
+const CONTRACT_GROUP = {
+  id: 'contract',
+  title: 'the live response held against the recorded baseline',
+};
+
+const NUMBERED = /^ex-\d{2}-/;
+
+/** Reading order for the unnumbered originals; anything else follows, by name. */
+const ORIGINALS = ['quickstart.mjs', 'bulk.mjs', 'error-handling.mjs'];
+
+function rank(file) {
+  const index = ORIGINALS.indexOf(file);
+
+  return index === -1 ? ORIGINALS.length : index;
+}
+
+/** The title a file gives itself: its `EX-NN —` line, or its opening sentence. */
+function titleOf(file, fallback) {
+  try {
+    const header = readFileSync(new URL(file, EXAMPLES_DIR), 'utf8').slice(0, 600);
+    const titled =
+      header.match(/EX-\d{2}\s+—\s+([^\n]+?)\.?\s*$/m) ??
+      header.match(/^\s*\*\s+(\S[^\n]*?)\.?\s*$/m);
+
+    if (titled) {
+      return titled[1];
+    }
+  } catch {
+    // The slug is a serviceable title.
   }
 
-  return envFile?.names.has(options.apiKeyEnv)
-    ? `${options.apiKeyEnv} in ${basename(envFile.path)}`
-    : options.apiKeyEnv;
+  return fallback;
+}
+
+/**
+ * Every example in `examples/`, in reading order, with the title it gives itself.
+ *
+ * The unnumbered originals come first: `quickstart`, `bulk` and `error-handling`
+ * are the shortest form of what the numbered files elaborate, and they are what
+ * anyone runs before anything else, so they are what the report opens with.
+ *
+ * Read from disk rather than listed here, so an example added tomorrow appears
+ * in the report on its own — with no check under it, which is the state worth
+ * seeing.
+ */
+function discoverExamples() {
+  let files;
+
+  try {
+    files = readdirSync(EXAMPLES_DIR)
+      .filter(name => name.endsWith('.mjs'))
+      .sort();
+  } catch {
+    return [];
+  }
+
+  const originals = files
+    .filter(name => !NUMBERED.test(name))
+    .sort((left, right) => rank(left) - rank(right) || left.localeCompare(right));
+
+  const ordered = [...originals, ...files.filter(name => NUMBERED.test(name))];
+
+  return ordered.map(file => {
+    const numbered = NUMBERED.test(file);
+    const id = numbered ? file.slice(0, 5) : file.slice(0, -4);
+    const slug = numbered ? file.slice(6, -4).replace(/-/g, ' ') : id.replace(/-/g, ' ');
+
+    return { id, title: titleOf(file, slug), file };
+  });
+}
+
+/**
+ * The headings, in reading order, with every check filed under the examples it
+ * covers.
+ *
+ * A check is listed in full under the first example it covers and cross-
+ * referenced under the rest: it ran once, so it is counted once, but an example
+ * whose claim is proven by a check that lives elsewhere still says so under its
+ * own heading rather than looking untested.
+ */
+function groupByExample(examples, entries) {
+  const groups = new Map(
+    [...examples, CONTRACT_GROUP].map(example => [
+      example.id,
+      { ...example, primary: [], secondary: [] },
+    ]),
+  );
+
+  const groupFor = id => {
+    if (!groups.has(id)) {
+      // A check naming something the examples directory does not have. Give it a
+      // heading anyway; a result must never fall out of the report.
+      groups.set(id, { id, title: 'no example file of this name', primary: [], secondary: [] });
+    }
+
+    return groups.get(id);
+  };
+
+  for (const entry of entries) {
+    const [primary, ...rest] = entry.covers;
+
+    groupFor(primary).primary.push(entry);
+
+    for (const id of rest) {
+      groupFor(id).secondary.push({ entry, under: primary });
+    }
+  }
+
+  return [...groups.values()];
 }
 
 // --- the runner -------------------------------------------------------------
@@ -297,8 +292,7 @@ function keySource(options, envFile) {
 const STATUS = { pass: '✓', fail: '✗', warn: '!', skip: '–' };
 
 class Runner {
-  constructor(options, apiKey) {
-    this.options = options;
+  constructor(apiKey) {
     this.apiKey = apiKey;
     this.results = [];
     this.findings = [];
@@ -313,10 +307,6 @@ class Runner {
   /** Records an observation that is informative but not a pass/fail. */
   note(check, message) {
     this.findings.push({ check, message });
-  }
-
-  budgetRemaining() {
-    return this.options.maxChecks - this.checksSpent;
   }
 
   /**
@@ -344,20 +334,7 @@ class Runner {
   }
 
   async run(definition) {
-    const { section, name, cost = 0, body } = definition;
-
-    if (cost > this.budgetRemaining()) {
-      this.results.push({
-        section,
-        name,
-        status: 'skip',
-        detail: `would cost ${cost} checks, only ${this.budgetRemaining()} left in the budget`,
-        cost: 0,
-      });
-
-      return null;
-    }
-
+    const { covers, name, cost = 0, body } = definition;
     const startedAt = Date.now();
 
     try {
@@ -365,7 +342,7 @@ class Runner {
 
       this.checksSpent += cost;
       this.results.push({
-        section,
+        covers,
         name,
         status: outcome.status ?? 'pass',
         detail: outcome.detail ?? '',
@@ -379,7 +356,7 @@ class Runner {
       // A failed check may still have been billed, so the cost stands.
       this.checksSpent += cost;
       this.results.push({
-        section,
+        covers,
         name,
         status: 'fail',
         detail: redact(error instanceof Error ? error.message : String(error)),
@@ -497,9 +474,9 @@ function reachedTransport(error) {
  * This is what keeps coverage affordable: most of what the examples claim is a
  * claim about a response, and one response answers all of them.
  */
-function fromRecord(section, name, body) {
+function fromRecord(covers, name, body) {
   return {
-    section,
+    covers,
     name,
     cost: 0,
     body(runner) {
@@ -519,8 +496,8 @@ function fromRecord(section, name, body) {
  * property copied 1:1 from the field the API returned, nothing invented, and
  * `null` returned only when the source is genuinely absent.
  */
-function sourceProjection({ section, name, get, mapping, absentStatus = 'warn', describe }) {
-  return fromRecord(section, name, (nonprofit, runner) => {
+function sourceProjection({ covers, name, get, mapping, absentStatus = 'warn', describe }) {
+  return fromRecord(covers, name, (nonprofit, runner) => {
     const projected = get(nonprofit);
     const wireFields = Object.values(mapping).filter(field => returned(nonprofit, field));
 
@@ -564,12 +541,10 @@ function sourceProjection({ section, name, get, mapping, absentStatus = 'warn', 
 
 // --- checks: the client itself (ex-01) --------------------------------------
 
-function clientChecks(options, apiKey) {
-  const section = 'client';
-
+function clientChecks(apiKey) {
   return [
     {
-      section,
+      covers: ['ex-01'],
       name: 'configuration and redaction',
       cost: 0,
       body(runner) {
@@ -600,7 +575,7 @@ function clientChecks(options, apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-01'],
       name: 'configuration is validated',
       cost: 0,
       body() {
@@ -652,7 +627,9 @@ function clientChecks(options, apiKey) {
     },
 
     {
-      section,
+      // The batch limit and the endpoint paths are exports ex-20 tells callers to
+      // import rather than copy, so its heading names this check too.
+      covers: ['ex-01', 'ex-20'],
       name: 'exported surface',
       cost: 0,
       body() {
@@ -713,7 +690,9 @@ function clientChecks(options, apiKey) {
     },
 
     {
-      section,
+      // ex-22 and ex-24 name the classes their probes raise; this is the part of
+      // what they claim that costs nothing and runs on every key.
+      covers: ['ex-16', 'error-handling', 'ex-22', 'ex-24'],
       name: 'error taxonomy',
       cost: 0,
       body() {
@@ -755,7 +734,9 @@ function clientChecks(options, apiKey) {
     },
 
     {
-      section,
+      // Every one of these examples says in prose that the helper it would have
+      // been convenient to call does not exist.
+      covers: ['ex-04', 'ex-06', 'ex-10', 'ex-14'],
       name: 'no derived verdicts',
       cost: 0,
       body() {
@@ -793,11 +774,9 @@ function clientChecks(options, apiKey) {
 // --- checks: local validation (ex-02, ex-15, ex-20) -------------------------
 
 function localValidationChecks(ein, apiKey) {
-  const section = 'input validation';
-
   return [
     {
-      section,
+      covers: ['ex-15', 'error-handling'],
       name: 'malformed input sends nothing',
       cost: 0,
       async body(runner) {
@@ -841,7 +820,7 @@ function localValidationChecks(ein, apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-02', 'ex-15', 'ex-18'],
       name: 'EIN helpers',
       cost: 0,
       body() {
@@ -885,7 +864,7 @@ function localValidationChecks(ein, apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-20', 'bulk'],
       name: 'bulk batch limit is local',
       cost: 0,
       async body(runner) {
@@ -959,14 +938,12 @@ function localValidationChecks(ein, apiKey) {
 
 // --- checks: authentication (ex-01, ex-23) ----------------------------------
 
-function authenticationChecks(options, ein, baseUrl) {
-  const section = 'authentication';
-
+function authenticationChecks(ein, baseUrl) {
   /** A client with the invalid key and a fetch we can count. */
   function rejectedClient(retry) {
     const counter = { sent: 0 };
     const client = new PactmanClient({
-      apiKey: options.invalidApiKey,
+      apiKey: INVALID_API_KEY,
       baseUrl,
       retry,
       timeoutMs: 15_000,
@@ -982,7 +959,7 @@ function authenticationChecks(options, ein, baseUrl) {
 
   return [
     {
-      section,
+      covers: ['ex-01', 'error-handling'],
       name: 'authentication is enforced',
       cost: 0,
       async body(runner) {
@@ -999,7 +976,7 @@ function authenticationChecks(options, ein, baseUrl) {
           if (error instanceof PactmanAuthenticationError) {
             assert(error.origin === 'api', `expected origin "api", got ${error.origin}`);
             assert(
-              !(JSON.stringify(error) + String(error.stack)).includes(options.invalidApiKey),
+              !(JSON.stringify(error) + String(error.stack)).includes(INVALID_API_KEY),
               'the rejected key appeared in error diagnostics',
             );
 
@@ -1021,7 +998,7 @@ function authenticationChecks(options, ein, baseUrl) {
     },
 
     {
-      section,
+      covers: ['ex-23'],
       name: 'rejected keys are not retried',
       cost: 0,
       async body(runner) {
@@ -1068,12 +1045,11 @@ function authenticationChecks(options, ein, baseUrl) {
 
 // --- checks: the single check and its record (ex-02..ex-05, ex-16) ----------
 
-function singleCheckChecks(options, ein, apiKey) {
-  const section = 'single check';
-
+function singleCheckChecks(ein, apiKey) {
   return [
     {
-      section,
+      // The one fetch every record-derived check below reads.
+      covers: ['ex-03', 'quickstart', 'ex-26', 'ex-27'],
       name: 'single check',
       cost: 1,
       async body(runner) {
@@ -1086,7 +1062,7 @@ function singleCheckChecks(options, ein, apiKey) {
         runner.observeCycleCount(result.checkCount);
 
         assert(result.status === 200, `expected HTTP 200, got ${result.status}`);
-        assert(result.nonprofit !== null, `no record returned for ${ein} — pass --ein with one that exists`);
+        assert(result.nonprofit !== null, `no record returned for ${ein} — EIN needs one that exists`);
         assert(
           result.nonprofit.ein === normalizeEin(ein),
           `response EIN ${result.nonprofit.ein} does not match the normalized request ${normalizeEin(ein)}`,
@@ -1102,7 +1078,7 @@ function singleCheckChecks(options, ein, apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-03', 'ex-21'],
       name: 'envelope shape',
       cost: 0,
       body(runner) {
@@ -1169,7 +1145,7 @@ function singleCheckChecks(options, ein, apiKey) {
       },
     },
 
-    fromRecord(section, 'model field coverage', (nonprofit, runner) => {
+    fromRecord(['ex-25', 'ex-03'], 'model field coverage', (nonprofit, runner) => {
       // Drift detection. New fields are expected over time and are not failures;
       // they are the reason `raw` and the index signature exist.
       const returnedFields = Object.keys(nonprofit);
@@ -1196,7 +1172,7 @@ function singleCheckChecks(options, ein, apiKey) {
       };
     }),
 
-    fromRecord(section, 'identity fields', (nonprofit, runner) => {
+    fromRecord(['ex-03'], 'identity fields', (nonprofit, runner) => {
       assert(/^\d{9}$/.test(String(nonprofit.ein)), `ein came back as "${nonprofit.ein}"`);
       assert(
         typeof nonprofit.organization_name === 'string' && nonprofit.organization_name.trim() !== '',
@@ -1220,7 +1196,7 @@ function singleCheckChecks(options, ein, apiKey) {
       };
     }),
 
-    fromRecord(section, 'name fields', (nonprofit, runner) => {
+    fromRecord(['ex-04'], 'name fields', (nonprofit, runner) => {
       const names = {
         organization_name: nonprofit.organization_name,
         organization_name_aka: nonprofit.organization_name_aka,
@@ -1254,7 +1230,7 @@ function singleCheckChecks(options, ein, apiKey) {
       };
     }),
 
-    fromRecord(section, 'address fields', (nonprofit, runner) => {
+    fromRecord(['ex-05'], 'address fields', (nonprofit, runner) => {
       const fields = ['address_line1', 'address_line2', 'city', 'state', 'state_name', 'zip'];
       const states = Object.fromEntries(fields.map(field => [field, presence(nonprofit, field)]));
 
@@ -1283,7 +1259,7 @@ function singleCheckChecks(options, ein, apiKey) {
     }),
 
     {
-      section,
+      covers: ['ex-02'],
       name: 'EIN normalization end to end',
       cost: 1,
       async body(runner) {
@@ -1311,21 +1287,21 @@ function singleCheckChecks(options, ein, apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-16'],
       name: 'not found',
       cost: 1,
       async body(runner) {
         const before = runner.requestsSent;
 
         try {
-          const result = await runner.client.nonprofits.check(options.missingEin);
+          const result = await runner.client.nonprofits.check(MISSING_EIN);
 
           runner.observeCycleCount(result.checkCount);
 
           if (result.nonprofit) {
             return {
               status: 'warn',
-              detail: `${options.missingEin} unexpectedly has a record — pass --missing-ein with an unused EIN`,
+              detail: `${MISSING_EIN} unexpectedly has a record — MISSING_EIN needs an unused one`,
             };
           }
 
@@ -1375,11 +1351,9 @@ function singleCheckChecks(options, ein, apiKey) {
 // --- checks: the sources (ex-06..ex-14) -------------------------------------
 
 function sourceChecks() {
-  const section = 'sources';
-
   return [
     sourceProjection({
-      section,
+      covers: ['ex-07'],
       name: 'Publication 78 projection',
       get: getPub78,
       mapping: {
@@ -1409,7 +1383,7 @@ function sourceChecks() {
     }),
 
     sourceProjection({
-      section,
+      covers: ['ex-06'],
       name: 'BMF projection',
       get: getBmf,
       mapping: {
@@ -1446,7 +1420,7 @@ function sourceChecks() {
     }),
 
     sourceProjection({
-      section,
+      covers: ['ex-08', 'ex-09'],
       name: 'revocation (AROE) projection',
       get: getAroe,
       // Most organizations were never revoked, so an absent source is the
@@ -1475,7 +1449,7 @@ function sourceChecks() {
     }),
 
     sourceProjection({
-      section,
+      covers: ['ex-10'],
       name: 'OFAC projection',
       get: getOfac,
       mapping: {
@@ -1489,7 +1463,7 @@ function sourceChecks() {
       },
     }),
 
-    fromRecord(section, 'OFAC stays four-valued', (nonprofit, runner) => {
+    fromRecord(['ex-10'], 'OFAC stays four-valued', (nonprofit, runner) => {
       const ofac = getOfac(nonprofit);
       const state =
         ofac === null ? 'unavailable' : ofac.status === null ? 'null' : typeof ofac.status;
@@ -1509,7 +1483,7 @@ function sourceChecks() {
       };
     }),
 
-    fromRecord(section, 'cross-source conflict', (nonprofit, runner) => {
+    fromRecord(['ex-11'], 'cross-source conflict', (nonprofit, runner) => {
       const conflict = nonprofit.irs_bmf_pub78_conflict;
 
       assert(
@@ -1535,7 +1509,7 @@ function sourceChecks() {
       };
     }),
 
-    fromRecord(section, 'foundation classification', (nonprofit, runner) => {
+    fromRecord(['ex-12'], 'foundation classification', (nonprofit, runner) => {
       const pairs = [
         ['bmf_subsection', 'subsection_description'],
         ['foundation_code', 'foundation_code_description'],
@@ -1570,7 +1544,7 @@ function sourceChecks() {
       };
     }),
 
-    fromRecord(section, 'filing and exemption metadata', (nonprofit, runner) => {
+    fromRecord(['ex-13'], 'filing and exemption metadata', (nonprofit, runner) => {
       const codes = [
         'filing_req_code',
         'exempt_status_code',
@@ -1611,7 +1585,7 @@ function sourceChecks() {
       };
     }),
 
-    fromRecord(section, 'data freshness', (nonprofit, runner) => {
+    fromRecord(['ex-14'], 'data freshness', (nonprofit, runner) => {
       const dateFields = [
         'report_date',
         'organization_info_last_modified',
@@ -1677,11 +1651,9 @@ function sourceChecks() {
 // --- checks: forward compatibility (ex-25) ----------------------------------
 
 function forwardCompatibilityChecks() {
-  const section = 'forward compatibility';
-
   return [
     {
-      section,
+      covers: ['ex-25'],
       name: 'raw envelope is unmodified',
       cost: 0,
       body(runner) {
@@ -1714,7 +1686,7 @@ function forwardCompatibilityChecks() {
       },
     },
 
-    fromRecord(section, 'no wire field is dropped', (nonprofit, runner) => {
+    fromRecord(['ex-25'], 'no wire field is dropped', (nonprofit, runner) => {
       const raw = runner.singleResult.raw;
       const data = Array.isArray(raw.data) ? raw.data[0] : raw.data;
       const wireFields = Object.keys(data);
@@ -1749,18 +1721,17 @@ function forwardCompatibilityChecks() {
 
 // --- checks: bulk (ex-17..ex-21) --------------------------------------------
 
-function bulkChecks(options, eins) {
-  const section = 'bulk';
+function bulkChecks(eins) {
   const bulkEins = eins.slice(0, Math.min(eins.length, 3));
   const duplicateProbe = eins.length >= 2 ? [eins[1], eins[0], eins[1]] : null;
   const checks = [];
 
   checks.push({
-    section,
+    covers: ['ex-19', 'bulk'],
     name: 'bulk partial success',
     cost: bulkEins.length + 1,
     async body(runner) {
-      const submitted = [...bulkEins, options.missingEin];
+      const submitted = [...bulkEins, MISSING_EIN];
       let result;
 
       try {
@@ -1776,7 +1747,7 @@ function bulkChecks(options, eins) {
         runner.freeTierKey = true;
         runner.note(
           'bulk partial success',
-          `this key restricts bulk requests to a fixed set of EINs, so a batch containing ${options.missingEin} was refused whole — rerun with a key that has open bulk access to verify partial success`,
+          `this key restricts bulk requests to a fixed set of EINs, so a batch containing ${MISSING_EIN} was refused whole — rerun with a key that has open bulk access to verify partial success`,
         );
 
         return {
@@ -1794,7 +1765,7 @@ function bulkChecks(options, eins) {
       );
       assert(result.organizations.length > 0, 'no organizations were returned');
 
-      if (!result.notFoundEins.includes(normalizeEin(options.missingEin))) {
+      if (!result.notFoundEins.includes(normalizeEin(MISSING_EIN))) {
         runner.note(
           'bulk partial success',
           `the missing EIN was not reported in errors[].eins; notFoundEins = ${JSON.stringify(result.notFoundEins)}`,
@@ -1825,7 +1796,7 @@ function bulkChecks(options, eins) {
 
   if (duplicateProbe) {
     checks.push({
-      section,
+      covers: ['ex-18'],
       name: 'bulk order and duplicates',
       cost: duplicateProbe.length,
       async body(runner) {
@@ -1880,7 +1851,7 @@ function bulkChecks(options, eins) {
   }
 
   checks.push({
-    section,
+    covers: ['ex-17'],
     name: 'bulk and single agree',
     cost: 0,
     body(runner) {
@@ -1930,7 +1901,7 @@ function bulkChecks(options, eins) {
   });
 
   checks.push({
-    section,
+    covers: ['ex-21'],
     name: 'bulk usage accounting',
     cost: 0,
     body(runner) {
@@ -1997,11 +1968,8 @@ function bulkChecks(options, eins) {
  * The baseline holds shapes only — path, type and value format, never a value —
  * so it is safe to commit and a failure is safe to print. See `contract.mjs`.
  */
-function contractChecks(options) {
-  const section = 'contract';
-  const baselinePath = options.contractBaseline
-    ? resolve(options.contractBaseline)
-    : fileURLToPath(new URL('./contract-baseline.json', import.meta.url));
+function contractChecks() {
+  const baselinePath = fileURLToPath(new URL('./contract-baseline.json', import.meta.url));
 
   /** Read once, on the first check that needs it. */
   let baseline;
@@ -2083,13 +2051,13 @@ function contractChecks(options) {
    *
    * With nothing recorded for this endpoint yet, there is nothing to hold it
    * against, so this run becomes the baseline. That is the whole first-run
-   * ceremony: run it, and from the next run on the comparison is live. Only
-   * re-recording over an existing baseline needs `--update-contract`, because
-   * that one discards evidence.
+   * ceremony: run it, and from the next run on the comparison is live. Deleting
+   * the file is how a recording is redone, and deleting it is deliberate work —
+   * re-recording discards the evidence a comparison would have given.
    */
   function against({ kind, name, diff, describe }) {
     return {
-      section,
+      covers: ['contract'],
       name,
       cost: 0,
       body(runner) {
@@ -2108,13 +2076,11 @@ function contractChecks(options) {
 
         const recorded = stored?.[kind]?.signature ? stored[kind] : null;
 
-        if (!recorded || options.updateContract) {
+        if (!recorded) {
           pending.add(kind);
 
           return {
-            detail: recorded
-              ? `${paths} paths re-recorded over the previous baseline`
-              : `${paths} paths recorded — the next run checks against them`,
+            detail: `${paths} paths recorded — the next run checks against them`,
             data: { paths, recorded: true },
           };
         }
@@ -2142,7 +2108,8 @@ function contractChecks(options) {
           result.total === 0,
           `the live ${kind} response no longer matches ${basename(baselinePath)} — ` +
             `${summarizeChanges(result.changes)}\n${formatChanges(result.changes)}\n` +
-            '      re-record with --update-contract once the change is understood and intended',
+            `      delete ${basename(baselinePath)} and re-run to re-record, ` +
+            'once the change is understood and intended',
         );
 
         return {
@@ -2181,7 +2148,7 @@ function contractChecks(options) {
   ];
 
   checks.push({
-    section,
+    covers: ['contract'],
     name: 'baseline',
     cost: 0,
     body(runner) {
@@ -2221,7 +2188,7 @@ function contractChecks(options) {
           {
             note:
               'Shape of the live API responses: path, JSON type and value format, no values. ' +
-              'Recorded on first run; re-record with: node scripts/smoke-live.mjs --update-contract',
+              'Recorded on first run; delete this file and re-run to re-record.',
             single: recordFor('single'),
             bulk: recordFor('bulk'),
           },
@@ -2254,11 +2221,9 @@ function baselineAge(recorded, stored) {
 // --- checks: rechecking the same record (ex-28..ex-30) ----------------------
 
 function recheckChecks(ein) {
-  const section = 'recheck';
-
   return [
     {
-      section,
+      covers: ['ex-29', 'ex-28', 'ex-30'],
       name: 'a repeat check is stable',
       cost: 1,
       async body(runner) {
@@ -2324,7 +2289,7 @@ function recheckChecks(ein) {
     },
 
     {
-      section,
+      covers: ['ex-21'],
       name: 'check count is cumulative',
       cost: 0,
       body(runner) {
@@ -2372,14 +2337,13 @@ function recheckChecks(ein) {
 // --- checks: what actually went on the wire (ex-01, ex-17, ex-20) -----------
 
 function wireChecks(apiKey) {
-  const section = 'wire';
   const singlePattern = new RegExp(
     `${SINGLE_CHECK_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{ein\\}', '\\d{9}')}$`,
   );
 
   return [
     {
-      section,
+      covers: ['ex-17', 'ex-03'],
       name: 'documented endpoints and methods',
       cost: 0,
       body(runner) {
@@ -2429,7 +2393,7 @@ function wireChecks(apiKey) {
     },
 
     {
-      section,
+      covers: ['ex-01'],
       name: 'credentials stay off the wire',
       cost: 0,
       body(runner) {
@@ -2467,15 +2431,20 @@ function wireChecks(apiKey) {
   ];
 }
 
-// --- checks: optional probes (ex-22, ex-24) ---------------------------------
+// --- checks: the disruptive probes (ex-22, ex-24) ---------------------------
 
-function optionalProbes(options, ein) {
-  const section = 'optional probes';
-  const probes = [];
-
-  if (options.includeTimeout) {
-    probes.push({
-      section,
+/**
+ * The two probes that misbehave on purpose: one starves a request of time, the
+ * other bursts until the server pushes back.
+ *
+ * They used to be opt-in, which meant the sign-off run routinely proved
+ * everything except the two paths a caller meets on their worst day. They are
+ * part of the plan now. The burst is bounded and stops the moment a 429 arrives.
+ */
+function probeChecks(ein) {
+  return [
+    {
+      covers: ['ex-24'],
       name: 'timeout and cancellation',
       cost: 2,
       async body(runner) {
@@ -2529,20 +2498,14 @@ function optionalProbes(options, ein) {
             ' · abort → PactmanNetworkError',
         };
       },
-    });
-  }
+    },
 
-  if (options.includeRateLimit) {
-    probes.push({
-      section,
+    {
+      covers: ['ex-22', 'error-handling'],
       name: 'rate limit',
-      cost: 10,
+      cost: RATE_LIMIT_ATTEMPTS,
       async body(runner) {
-        // Deliberately bursts against a live service. Opt-in only, bounded, and
-        // it stops the moment a 429 arrives.
-        const attempts = 10;
-
-        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        for (let attempt = 1; attempt <= RATE_LIMIT_ATTEMPTS; attempt += 1) {
           try {
             const result = await runner.client.nonprofits.check(ein, { retry: false });
 
@@ -2565,144 +2528,123 @@ function optionalProbes(options, ein) {
 
         return {
           status: 'warn',
-          detail: `no 429 within ${attempts} sequential requests — the limit was not reached`,
+          detail: `no 429 within ${RATE_LIMIT_ATTEMPTS} sequential requests — the limit was not reached`,
         };
       },
-    });
-  }
-
-  return probes;
+    },
+  ];
 }
 
 /**
- * The plan. Each entry declares its billable cost up front so the total can be
- * shown and confirmed before anything is sent.
+ * The plan: every check in this file, in the order their results depend on.
  *
- * Order matters: the record-derived checks read what the single check fetched,
- * and the wire checks read the log every earlier check wrote.
+ * The record-derived checks read what the single check fetched, the contract
+ * checks read both responses, and the wire checks read the log every earlier
+ * check wrote — so this order is not the order the report is read in, and the
+ * report regroups it.
+ *
+ * Nothing here is conditional. Each entry declares its billable cost so the
+ * total can be printed before the first request goes out.
  */
-function buildPlan(options, ein, eins, apiKey, baseUrl) {
+function buildPlan(apiKey, baseUrl) {
   return [
-    ...clientChecks(options, apiKey),
-    ...localValidationChecks(ein, apiKey),
-    ...authenticationChecks(options, ein, baseUrl),
-    ...singleCheckChecks(options, ein, apiKey),
+    ...clientChecks(apiKey),
+    ...localValidationChecks(EIN, apiKey),
+    ...authenticationChecks(EIN, baseUrl),
+    ...singleCheckChecks(EIN, apiKey),
     ...sourceChecks(),
     ...forwardCompatibilityChecks(),
-    ...bulkChecks(options, eins),
-    ...contractChecks(options),
-    ...recheckChecks(ein),
+    ...bulkChecks(BULK_EINS),
+    ...contractChecks(),
+    ...recheckChecks(EIN),
     ...wireChecks(apiKey),
-    ...optionalProbes(options, ein),
+    ...probeChecks(EIN),
   ];
+}
+
+// --- the report -------------------------------------------------------------
+
+/** Column the detail text starts in, so the results read as two columns. */
+const NAME_WIDTH = 34;
+
+/** A name in its column, never run together with the detail beside it. */
+function column(name, width = NAME_WIDTH) {
+  return name.length < width ? name.padEnd(width) : `${name} `;
+}
+
+/** The observations each check recorded, keyed by the check that recorded them. */
+function findingsByCheck(findings) {
+  const byCheck = new Map();
+
+  for (const finding of findings) {
+    byCheck.set(finding.check, [...(byCheck.get(finding.check) ?? []), finding.message]);
+  }
+
+  return byCheck;
+}
+
+/**
+ * One heading per example file, and under it what this run has to say about
+ * what that file claims.
+ *
+ * A check that covers more than one example is printed in full under the first
+ * and referred to under the rest, so an example whose claim is proven somewhere
+ * else says where instead of looking untested — and nothing is counted twice.
+ */
+function printReport(groups, findings) {
+  const observations = findingsByCheck(findings);
+
+  for (const group of groups) {
+    say(`\n${group.id}  ${group.title}`);
+
+    for (const result of group.primary) {
+      say(
+        `  ${STATUS[result.status]} ${column(result.name)}${result.detail}` +
+          (result.cost > 0 ? `  [${result.cost} check(s)]` : ''),
+      );
+
+      for (const message of observations.get(result.name) ?? []) {
+        say(`      · ${message}`);
+      }
+    }
+
+    for (const { entry, under } of group.secondary) {
+      say(`  ↳ ${STATUS[entry.status]} ${column(entry.name, NAME_WIDTH - 2)}checked under ${under}`);
+    }
+
+    if (group.primary.length === 0 && group.secondary.length === 0) {
+      say('  – no check of its own — it composes examples checked above');
+    }
+  }
 }
 
 // --- main -------------------------------------------------------------------
 
 const envFile = loadEnvFile();
-const options = parseArgs(process.argv.slice(2));
-
-const apiKey = options.apiKey ?? process.env[options.apiKeyEnv];
+const apiKey = process.env[API_KEY_ENV];
 
 if (!apiKey) {
-  console.error(
-    `No API key. Put ${options.apiKeyEnv} in nodejs/.env or export it, ` +
-      'or pass --api-key-env <NAME> to name a different variable.',
-  );
+  console.error(`No API key. Put ${API_KEY_ENV} in nodejs/.env, or export it, and run this again.`);
   process.exit(2);
 }
 
 secrets.add(apiKey);
-secrets.add(options.invalidApiKey);
+secrets.add(INVALID_API_KEY);
 
-if (options.apiKeyOnArgv) {
-  console.warn(
-    'Warning: --api-key puts the credential in your shell history and the process list.\n' +
-      '         Prefer an environment variable with --api-key-env.\n',
-  );
-}
-
-const baseUrl = options.baseUrl ?? baseUrlForEnvironment(DEFAULT_ENVIRONMENT);
-const ein = options.ein ?? options.eins?.[0] ?? DEFAULT_EIN;
-
-// Naming a single subject narrows the bulk probes to it; naming neither runs the
-// sign-off pair, which is what makes the bare command a complete run.
-const eins = options.eins ?? (options.ein ? [options.ein] : DEFAULT_BULK_EINS);
-
-for (const value of [ein, ...eins, options.missingEin]) {
-  try {
-    normalizeEin(value);
-  } catch (error) {
-    console.error(`"${value}" is not a usable EIN: ${error.message}`);
-    process.exit(2);
-  }
-}
-
-const plan = buildPlan(options, ein, eins, apiKey, baseUrl);
+const baseUrl = process.env.PACTMAN_BASE_URL ?? baseUrlForEnvironment(DEFAULT_ENVIRONMENT);
+const examples = discoverExamples();
+const plan = buildPlan(apiKey, baseUrl);
 const plannedCost = plan.reduce((total, check) => total + check.cost, 0);
-const billableChecks = plan.filter(check => check.cost > 0).length;
+const freeChecks = plan.filter(check => check.cost === 0).length;
 
-if (!options.json) {
-  say(`Target        ${baseUrl}`);
-  say(`Key           from ${keySource(options, envFile)} (${apiKey.length} characters, never printed)`);
-  say(`Known EIN     ${ein}`);
-  say(`Bulk EINs     ${eins.join(', ')}`);
-  say(`Missing EIN   ${options.missingEin}`);
-  say(`Plan          ${plan.length} contract checks, ${plan.length - billableChecks} of them free`);
-  say(`Cost          ${plannedCost} billable API checks (ceiling ${options.maxChecks})`);
-  say('');
-}
+say(`Target        ${baseUrl}`);
+say(`Key           from ${keySource(envFile)} (${apiKey.length} characters, never printed)`);
+say(`Subjects      ${EIN} · bulk ${BULK_EINS.join(', ')} · no record ${MISSING_EIN}`);
+say(`Plan          ${plan.length} checks across ${examples.length} example files, ${freeChecks} of them free`);
+say(`Cost          ${plannedCost} billable API checks, charged to this key`);
+say('');
 
-// The ceiling throttles rather than aborts: the free contract checks still run,
-// and paid ones are skipped once the budget is exhausted.
-if (plannedCost > options.maxChecks && !options.json) {
-  say(
-    `Note: the full plan costs ${plannedCost} checks and --max-checks is ${options.maxChecks}.\n` +
-      '      Checks that no longer fit the budget will be skipped, not run.\n',
-  );
-}
-
-if (options.dryRun) {
-  let plannedSection = null;
-
-  for (const check of plan) {
-    if (check.section !== plannedSection) {
-      plannedSection = check.section;
-      say(`\n  ${plannedSection}`);
-    }
-
-    say(`    ${check.cost === 0 ? ' free' : `${String(check.cost).padStart(2)}   `}  ${check.name}`);
-  }
-
-  say(`\nDry run — nothing was sent.`);
-  process.exit(0);
-}
-
-if (!options.yes) {
-  if (!process.stdin.isTTY) {
-    console.error(
-      'Refusing to spend quota without confirmation. Re-run with --yes, or --dry-run to see the plan.',
-    );
-    process.exit(2);
-  }
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await rl.question(
-    `This will consume up to ${Math.min(plannedCost, options.maxChecks)} billable checks ` +
-      `against ${baseUrl}. Continue? [y/N] `,
-  );
-
-  rl.close();
-
-  if (!/^y(es)?$/i.test(answer.trim())) {
-    console.log('Aborted. Nothing was sent.');
-    process.exit(0);
-  }
-
-  say('');
-}
-
-const runner = new Runner(options, apiKey);
+const runner = new Runner(apiKey);
 
 // Records every outbound request, so "nothing was sent" and "the key never left
 // the Authorization header" can be asserted rather than assumed.
@@ -2722,81 +2664,60 @@ runner.client = new PactmanClient({
 
 const startedAt = Date.now();
 
-let currentSection = null;
-
-for (const check of plan) {
-  await runner.run(check);
-
-  if (!options.json) {
-    const result = runner.results.at(-1);
-
-    if (result.section !== currentSection) {
-      currentSection = result.section;
-      say(`\n${currentSection}`);
-    }
-
-    say(
-      `  ${STATUS[result.status]} ${result.name.padEnd(33)} ${result.detail}` +
-        (result.cost > 0 ? `  [${result.cost} check(s)]` : ''),
-    );
-
-    if (options.verbose && result.data) {
-      say(`      ${JSON.stringify(result.data)}`);
-    }
-  }
-}
-
-const summary = {
-  target: baseUrl,
-  sdkVersion: VERSION,
-  startedAt: new Date(startedAt).toISOString(),
-  durationMs: Date.now() - startedAt,
-  requestsSent: runner.requestsSent,
-  /** What the plan budgeted. The counter delta below is what actually happened. */
-  budgetedChecks: runner.checksSpent,
-  cycleCount: {
-    before: runner.cycleCountStart,
-    after: runner.cycleCountEnd,
-    delta:
-      runner.cycleCountStart === null || runner.cycleCountEnd === null
-        ? null
-        : runner.cycleCountEnd - runner.cycleCountStart,
-  },
-  counts: {
+/** Prints everything the run learned, however it ended, and stops. */
+function finish(exitCode) {
+  const counts = {
     total: runner.results.length,
-    pass: runner.results.filter(r => r.status === 'pass').length,
-    warn: runner.results.filter(r => r.status === 'warn').length,
-    fail: runner.results.filter(r => r.status === 'fail').length,
-    skip: runner.results.filter(r => r.status === 'skip').length,
-  },
-  results: runner.results,
-  findings: runner.findings,
-};
+    pass: runner.results.filter(result => result.status === 'pass').length,
+    warn: runner.results.filter(result => result.status === 'warn').length,
+    fail: runner.results.filter(result => result.status === 'fail').length,
+    skip: runner.results.filter(result => result.status === 'skip').length,
+  };
 
-if (options.json) {
-  console.log(redact(JSON.stringify(summary, null, 2)));
-} else {
-  if (runner.findings.length > 0) {
-    say('\nObservations');
+  const groups = groupByExample(examples, runner.results);
+  const files = groups.filter(group => group.id !== CONTRACT_GROUP.id);
+  const own = files.filter(group => group.primary.length > 0).length;
+  const borrowed = files.filter(group => group.primary.length === 0 && group.secondary.length > 0).length;
+  const delta =
+    runner.cycleCountStart === null || runner.cycleCountEnd === null
+      ? null
+      : runner.cycleCountEnd - runner.cycleCountStart;
 
-    for (const finding of runner.findings) {
-      say(`  · ${finding.check}: ${finding.message}`);
-    }
-  }
+  // Closes the ticker line.
+  say('');
+
+  printReport(groups, runner.findings);
 
   say('\nSummary');
   say(
-    `  ${summary.counts.total} contract checks: ${summary.counts.pass} passed, ` +
-      `${summary.counts.fail} failed, ${summary.counts.warn} warned, ${summary.counts.skip} skipped`,
+    `  ${counts.total} checks: ${counts.pass} passed, ${counts.fail} failed, ` +
+      `${counts.warn} warned, ${counts.skip} skipped`,
+  );
+  say(
+    `  ${files.length} example files: ${own} checked here, ${borrowed} checked under another, ` +
+      `${files.length - own - borrowed} with no check`,
   );
   say(`  ${runner.requestsSent} HTTP requests · ${runner.checksSpent} checks budgeted`);
   say(
     `  billing-cycle counter: ${runner.cycleCountStart ?? 'n/a'} → ${runner.cycleCountEnd ?? 'n/a'}` +
-      (summary.cycleCount.delta === null
-        ? ''
-        : `  (+${summary.cycleCount.delta} actually billed)`),
+      (delta === null ? '' : `  (+${delta} actually billed)`),
   );
-  say(`  ${summary.durationMs}ms`);
+  say(`  ${Date.now() - startedAt}ms · SDK ${VERSION}`);
+
+  process.exit(exitCode);
 }
 
-process.exit(summary.counts.fail > 0 ? 1 : 0);
+// A run stopped halfway still paid for everything it sent, so it still reports.
+process.on('SIGINT', () => finish(130));
+
+// The report cannot start until the last check is done, so the ticker is what
+// says the run is alive: one mark per check, in the order they run.
+process.stdout.write('Running       ');
+
+for (const check of plan) {
+  await runner.run(check);
+
+  process.stdout.write(STATUS[runner.results.at(-1).status]);
+}
+
+finish(runner.results.some(result => result.status === 'fail') ? 1 : 0);

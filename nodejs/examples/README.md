@@ -20,8 +20,8 @@ npm run examples:smoke -- ex-22 ex-23            # a subset
 
 | Target                            | Examples                   |                                                                                                                                                    |
 | --------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Production, or `PACTMAN_BASE_URL` | `ex-01` – `ex-07`, `ex-15` | Ordinary lookups. Pass an EIN as the first argument where noted.                                                                                   |
-| The bundled fixture API           | everything else            | Needs a record or a response a live API will not produce on request: a revoked exemption, an OFAC match, an HTTP 429, a field newer than this SDK. |
+| Production, or `PACTMAN_BASE_URL` | `ex-01` – `ex-04`, `ex-06`, `ex-07`, `ex-15` | Ordinary lookups. Pass an EIN as the first argument where noted.                                                                                   |
+| The bundled fixture API           | everything else            | Needs a record or a response a live API will not produce on request: a revoked exemption, an OFAC match, an HTTP 429, an address that contradicts itself, a field newer than this SDK. |
 
 Fixture-backed examples start [`scripts/mock-server.mjs`](../scripts/mock-server.mjs)
 themselves and shut it down on the way out. Set `PACTMAN_BASE_URL` to point them
@@ -37,12 +37,12 @@ somewhere else. Fixture records live in [`scripts/fixtures.mjs`](../scripts/fixt
 | EX-02 | [ex-02-ein-normalization.mjs](./ex-02-ein-normalization.mjs)   | A hyphenated, whitespace-padded EIN normalized to nine digits before the request, with the original kept for diagnostics.                                                  |
 | EX-03 | [ex-03-identity-lookup.mjs](./ex-03-identity-lookup.mjs)       | EIN, name, AKA and Pactman profile URL, plus the raw envelope alongside the typed model.                                                                                   |
 
-### Comparing an applicant against the record
+### Comparing and validating against the record
 
 |       |                                                                |                                                                                                                                                  |
 | ----- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | EX-04 | [ex-04-name-comparison.mjs](./ex-04-name-comparison.mjs)       | Compare a submitted name with `organization_name` and `organization_name_aka` without treating punctuation or abbreviation differences as fraud. |
-| EX-05 | [ex-05-address-comparison.mjs](./ex-05-address-comparison.mjs) | Compare each address component, keeping "did not match" separate from "was not returned".                                                        |
+| EX-05 | [ex-05-address-validation.mjs](./ex-05-address-validation.mjs) | Validate the returned address structurally — present, self-consistent, or neither. Complete is not the same as correct.                          |
 
 ### Reading the sources
 
@@ -101,13 +101,16 @@ somewhere else. Fixture records live in [`scripts/fixtures.mjs`](../scripts/fixt
 
 The examples above prove the SDK works. To prove a _deployment_ still matches the
 documented contract — and to see any schema drift — run the live smoke test
-instead. It spends real quota, so it prints its plan and asks first.
+instead. It takes no options and skips nothing, and it reports per example file:
+one heading per `ex-NN`, and under it every check that stands behind what that
+file claims.
 
 ```bash
-PACTMAN_API_KEY=your_key npm run smoke:live -- --base-url https://entities.pactman.org --dry-run
+PACTMAN_API_KEY=your_key npm run smoke:live
 ```
 
-Run `npm run smoke:live -- --help` for every option.
+It spends real quota. What it will cost is printed before the first request goes
+out. `PACTMAN_BASE_URL` aims it at a deployment other than production.
 
 ## Shared helpers
 
@@ -119,7 +122,8 @@ stays on its own subject. None of it is part of the SDK.
 | [lib/client.mjs](./lib/client.mjs)           | Reads the key and builds a client — the distilled form of EX-01.                               |
 | [lib/print.mjs](./lib/print.mjs)             | Console formatting. Prints `<null>` and `<not returned>` differently, on purpose.              |
 | [lib/fixture-api.mjs](./lib/fixture-api.mjs) | Starts and stops the fixture API for scenario-based examples.                                  |
-| [lib/matching.mjs](./lib/matching.mjs)       | Name and address comparison, used by EX-04, EX-05 and the workflows.                           |
+| [lib/matching.mjs](./lib/matching.mjs)       | Name and address comparison, used by EX-04, EX-11 and the workflows.                           |
+| [lib/address.mjs](./lib/address.mjs)         | Structural address validation for EX-05 — USPS codes, ZIP-to-state, placeholders. Offline.     |
 | [lib/irs-codes.mjs](./lib/irs-codes.mjs)     | Lookup tables with an unknown-value fallback, for codes the API returns without a description. |
 | [lib/screening.mjs](./lib/screening.mjs)     | Gathers findings into one comparable object for the workflow examples. Decides nothing.        |
 

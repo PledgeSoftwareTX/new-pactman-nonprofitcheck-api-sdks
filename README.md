@@ -7,6 +7,7 @@ One directory per language, each published independently.
 | Language             | Package                            | Status    | Docs                                   |
 | -------------------- | ---------------------------------- | --------- | -------------------------------------- |
 | Node.js / TypeScript | `@pactmandev/nonprofit-check-plus` | Available | [nodejs/README.md](./nodejs/README.md) |
+| Python               | `pactman-nonprofit-check-plus`     | Available | [python/README.md](./python/README.md) |
 
 ## API surface
 

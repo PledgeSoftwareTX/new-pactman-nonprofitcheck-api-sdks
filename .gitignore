@@ -1,4 +1,4 @@
-node_modules
+# Shared
 dist
 coverage
 .env
@@ -6,3 +6,19 @@ coverage
 !.env.example
 *.log
 .DS_Store
+
+# Node.js
+node_modules
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

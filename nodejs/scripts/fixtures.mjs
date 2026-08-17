@@ -28,6 +28,8 @@ export const FIXTURE_EINS = {
   privateFoundation: '042103594',
   /** A record with most optional identity fields returned as null. */
   sparseIdentity: '060646700',
+  /** Address fields that are present but disagree with each other. */
+  inconsistentAddress: '311580204',
   /** Every source date is old, for the freshness and re-review examples. */
   staleData: '362167048',
   /** Listed in the IRS Automatic Revocation of Exemption data, not reinstated. */
@@ -239,6 +241,29 @@ export const FIXTURE_ORGANIZATIONS = {
     // No OFAC keys at all: the source was not reported for this organization,
     // which is not the same as a null status or a no-match result.
     ['ofac_status', 'ofac_list_published_date'],
+  ),
+
+  // Every address component is present, and they contradict one another: the
+  // state code says Massachusetts, the state name and the ZIP say Maine, and
+  // address_line2 holds a placeholder. Transcription damage of this kind
+  // survives any check that only asks whether a field came back non-null.
+  [FIXTURE_EINS.inconsistentAddress]: publicCharity(
+    FIXTURE_EINS.inconsistentAddress,
+    'Harbor Light Example Alliance',
+    {
+      organization_name_aka: null,
+      address_line1: '12 SEA STREET',
+      address_line2: 'N/A',
+      city: 'ROCKPORT',
+      state: 'MA',
+      state_name: 'Maine',
+      zip: '04856',
+      pub78_city: 'Rockport',
+      pub78_state: 'MA',
+      bmf_city: 'ROCKPORT',
+      bmf_state: 'MA',
+      bmf_street_address: '12 SEA STREET',
+    },
   ),
 
   // Nothing adverse, but every source is well out of date. A workflow with a

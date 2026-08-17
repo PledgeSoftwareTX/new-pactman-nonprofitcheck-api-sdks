@@ -33,7 +33,7 @@ Official Node.js SDK for the **Pactman Nonprofit Check Plus API**. Look up US no
 - [API reference](#api-reference)
 - [Examples](#examples)
   - [Getting started](#getting-started) — EX-01 to EX-03
-  - [Comparing an applicant against the record](#comparing-an-applicant-against-the-record) — EX-04, EX-05
+  - [Comparing and validating against the record](#comparing-and-validating-against-the-record) — EX-04, EX-05
   - [Reading the sources](#reading-the-sources) — EX-06 to EX-14
   - [Errors and edge cases](#errors-and-edge-cases) — EX-15, EX-16, EX-22 to EX-25
   - [Bulk](#bulk) — EX-17 to EX-21
@@ -547,7 +547,7 @@ if (result.nonprofit) {
 }
 ```
 
-### Comparing an applicant against the record
+### Comparing and validating against the record
 
 #### EX-04 — Applicant name comparison
 
@@ -582,38 +582,37 @@ const outcome =
 const routed = outcome === 'agreement' ? 'continue' : 'manual_review';
 ```
 
-#### EX-05 — Applicant address comparison
+#### EX-05 — Validating the returned address
 
-Compare each address component, keeping "did not match" separate from "was not returned". [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-05-address-comparison.mjs)
+Ask whether the address the API returned is well-formed and self-consistent, before acting on it. [Full source](https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/blob/master/nodejs/examples/ex-05-address-validation.mjs)
 
 ```js
-const COMPONENTS = ['address_line1', 'address_line2', 'city', 'state', 'state_name', 'zip'];
+const { nonprofit } = await client.nonprofits.check(ein);
 
-const loosely = value => String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
-const zip5 = value => String(value).replace(/\D/g, '').slice(0, 5); // ZIP+4 vs ZIP5 is formatting
+// `state` and `state_name` are two fields for one fact, and the ZIP encodes the
+// state a third time. A record can be complete and still contradict itself.
+const state = nonprofit?.state?.trim().toUpperCase() ?? null;
+const zipDigits = String(nonprofit?.zip ?? '').replace(/\D/g, '');
 
-const { nonprofit } = await client.nonprofits.check(applicant.ein);
-
-const outcomes = Object.fromEntries(
-  COMPONENTS.map(component => {
-    const submitted = applicant.address[component];
-    const returned = nonprofit?.[component];
-    const normalize = component === 'zip' ? zip5 : loosely;
-
-    // Three outcomes, never two. An organization whose zip came back null has
-    // not confirmed your applicant's ZIP code.
-    if (returned === null || returned === undefined) return [component, 'not_returned'];
-    if (submitted === null || submitted === undefined) return [component, 'not_submitted'];
-
-    return [component, normalize(submitted) === normalize(returned) ? 'match' : 'mismatch'];
-  }),
+const missing = ['address_line1', 'city', 'state', 'zip'].filter(
+  component => nonprofit?.[component] == null || String(nonprofit[component]).trim() === '',
 );
 
-const conflicting = COMPONENTS.filter(component => outcomes[component] === 'mismatch');
-const missing = COMPONENTS.filter(component => outcomes[component] === 'not_returned');
+const failures = [
+  US_STATES.has(state) ? null : 'state is not a USPS code',
+  // A check that cannot run reports nothing, never a failure: an incomplete
+  // lookup table must not manufacture a finding about somebody's address.
+  US_STATES.get(state) === nonprofit?.state_name ? null : 'state_name disagrees with state',
+  [5, 9].includes(zipDigits.length) ? null : 'zip is not 5 or 9 digits',
+  statesForZip(zipDigits)?.has(state) === false ? 'zip belongs to another state' : null,
+].filter(Boolean);
 
-// This policy refuses to treat absence as confirmation.
-const routed = conflicting.length > 0 || missing.length > 0 ? 'manual_review' : 'continue';
+// Three verdicts, and the middle one is the point. Absence is not validity.
+const verdict = failures.length > 0 ? 'inconsistent' : missing.length > 0 ? 'incomplete' : 'usable';
+const routed = verdict === 'usable' ? 'continue' : 'manual_review';
+
+// Well-formed is not deliverable. USPS, Lob, Smarty and Google Address
+// Validation answer that one, over the network, with a second credential.
 ```
 
 ### Reading the sources
