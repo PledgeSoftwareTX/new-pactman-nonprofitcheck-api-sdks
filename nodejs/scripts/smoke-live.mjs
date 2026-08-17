@@ -19,16 +19,17 @@
  * what says it is alive in the meantime.
  *
  * IT SPENDS REAL QUOTA. Every billable check is charged against the account
- * behind the key. There is nothing to configure and nothing to opt into: one
- * command runs the whole plan, the disruptive probes included, and what it will
- * cost is printed as it starts.
+ * behind the key. There is nothing to opt into: one command runs the whole plan,
+ * the disruptive probes included, and what it will cost is printed as it starts.
  *
  * Usage
- *   node scripts/smoke-live.mjs
+ *   node scripts/smoke-live.mjs <ein> <bulk-eins> <missing-ein>
  *
- * That is the whole interface. The key is read from PACTMAN_API_KEY, in the
- * environment or in `nodejs/.env`; PACTMAN_BASE_URL aims the run at a deployment
- * other than production, which is how it is run against the mock server.
+ * The subjects default to the organizations named below, and are replaced on the
+ * command line for a key whose allowlist holds different ones; `--help` prints
+ * the whole interface. The key is read from PACTMAN_API_KEY, in the environment
+ * or in `nodejs/.env`; PACTMAN_BASE_URL aims the run at a deployment other than
+ * production, which is how it is run against the mock server.
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -81,15 +82,123 @@ import { KNOWN_NONPROFIT_FIELDS } from './fixtures.mjs';
 /**
  * The organizations this harness checks.
  *
- * A primary subject with a record, a second one to give the bulk order and
- * duplicate probes something to work with, and a well-formed EIN with no record
- * for the not-found and partial-success paths. They are the test data in the
- * test plan, and the first two are reachable on a free-tier key, so a free key
- * gets as far as a free key can.
+ * A primary subject with a record, a batch to give the bulk, order and duplicate
+ * probes something to work with, and a well-formed EIN with no record for the
+ * not-found and partial-success paths.
+ *
+ * None of them are written down here. A key carries its own allowlist, so which
+ * organizations are reachable is a property of whoever is running this, and a
+ * default would only mean spending their quota on an EIN their key may not even
+ * reach — reported as the deployment's failure rather than the wrong subject.
+ * Each is given on the command line, in this order, or in the environment
+ * beside the key.
  */
-const EIN = '996589560';
-const BULK_EINS = ['996589560', '680343125'];
-const MISSING_EIN = '999999999';
+const SUBJECTS = [
+  {
+    name: 'ein',
+    variable: 'PACTMAN_SMOKE_EIN',
+    purpose: 'the single check, and every check that reads the record it returns',
+  },
+  {
+    name: 'bulk-eins',
+    variable: 'PACTMAN_SMOKE_BULK_EIN',
+    purpose: 'comma-separated, two or more, for the batch, order and duplicate probes',
+    // The bulk probes read the first three; the rest would cost quota unspent.
+    list: { min: 2, max: 3 },
+  },
+  {
+    name: 'missing-ein',
+    variable: 'PACTMAN_SMOKE_MISSING_EIN',
+    purpose: 'well-formed with no record, for the not-found paths',
+  },
+];
+
+const USAGE = [
+  `Usage: node scripts/smoke-live.mjs ${SUBJECTS.map(({ name }) => `<${name}>`).join(' ')}`,
+  '',
+  ...SUBJECTS.map(
+    ({ name, variable, purpose }) => `  ${name.padEnd(14)}${purpose}\n  ${''.padEnd(14)}or ${variable}`,
+  ),
+  '',
+  'The key is read from PACTMAN_API_KEY, in the environment or in nodejs/.env.',
+  'PACTMAN_BASE_URL aims the run at a deployment other than production.',
+].join('\n');
+
+/**
+ * The subjects for this run, normalized, with where each one came from.
+ *
+ * A missing or malformed EIN stops the run here rather than at the first
+ * request. The alternative is spending quota on a lookup that was never going to
+ * match and then reading the failure as the deployment's. Every problem is
+ * reported at once, so a run is not corrected one argument per attempt.
+ */
+function resolveSubjects(args, envFile) {
+  if (args.includes('-h') || args.includes('--help')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  if (args.length > SUBJECTS.length) {
+    console.error(`This takes ${SUBJECTS.length} arguments; ${args.length} were given.\n\n${USAGE}`);
+    process.exit(2);
+  }
+
+  const resolved = [];
+  const problems = [];
+
+  SUBJECTS.forEach(({ name, variable, list }, index) => {
+    const fromArgs = args[index];
+    const given = (fromArgs ?? process.env[variable])?.trim();
+
+    if (!given) {
+      problems.push(`<${name}> was not given, and ${variable} is not set`);
+
+      return;
+    }
+
+    const parts = (list ? given.split(',') : [given]).map(part => part.trim());
+    const malformed = parts.filter(part => !isValidEin(part));
+
+    if (malformed.length > 0) {
+      problems.push(
+        `${malformed.map(part => `"${part}"`).join(', ')} in <${name}> ` +
+          `${malformed.length === 1 ? 'is not a well-formed EIN' : 'are not well-formed EINs'}`,
+      );
+
+      return;
+    }
+
+    if (list && parts.length < list.min) {
+      problems.push(
+        `<${name}> holds ${parts.length} EIN; the order and duplicate probes need at least ${list.min}`,
+      );
+
+      return;
+    }
+
+    // Normalized here so every check downstream compares canonical forms; the
+    // ones that prove normalization works build their own hyphenated input.
+    const eins = parts.map(part => normalizeEin(part));
+
+    resolved.push({
+      value: list ? eins.slice(0, list.max) : eins[0],
+      ignored: list ? eins.slice(list.max) : [],
+      source:
+        fromArgs !== undefined
+          ? 'the command line'
+          : envFile?.names.has(variable)
+            ? basename(envFile.path)
+            : 'the environment',
+    });
+  });
+
+  if (problems.length > 0) {
+    console.error(`${problems.join('\n')}\n\n${USAGE}`);
+    process.exit(2);
+  }
+
+  return resolved;
+}
 
 /** The variable the credential is read from, in the environment or in `.env`. */
 const API_KEY_ENV = 'PACTMAN_API_KEY';
@@ -781,8 +890,26 @@ function localValidationChecks(ein, apiKey) {
       cost: 0,
       async body(runner) {
         const before = runner.requestsSent;
+        const normalized = normalizeEin(ein);
 
-        for (const bad of ['41178709', 'not-an-ein', '', null, '41.1787097', 4117870971]) {
+        // Each one is the subject with a single thing wrong with it, so what is
+        // being rejected is that flaw and not some other property of the input.
+        const malformed = [
+          normalized.slice(0, EIN_LENGTH - 1),
+          'not-an-ein',
+          '',
+          null,
+          `${normalized.slice(0, 2)}.${normalized.slice(2)}`,
+          Number(normalized),
+        ];
+
+        const batches = [
+          ['an empty batch', []],
+          ['a non-array batch', 'not-an-array'],
+          ['a batch with one bad entry', [ein, 'nope']],
+        ];
+
+        for (const bad of malformed) {
           try {
             await runner.client.nonprofits.check(bad);
             throw new Error(`"${bad}" was accepted by local validation`);
@@ -795,11 +922,7 @@ function localValidationChecks(ein, apiKey) {
           }
         }
 
-        for (const [description, input] of [
-          ['an empty batch', []],
-          ['a non-array batch', 'not-an-array'],
-          ['a batch with one bad entry', [ein, 'nope']],
-        ]) {
+        for (const [description, input] of batches) {
           try {
             await runner.client.nonprofits.checkBulk(input);
             throw new Error(`${description} was accepted`);
@@ -815,7 +938,9 @@ function localValidationChecks(ein, apiKey) {
 
         assert(sent === 0, `${sent} HTTP requests were sent for input that should never leave the process`);
 
-        return { detail: '9 malformed inputs rejected in-process with 0 requests' };
+        return {
+          detail: `${malformed.length + batches.length} malformed inputs rejected in-process with 0 requests`,
+        };
       },
     },
 
@@ -825,30 +950,37 @@ function localValidationChecks(ein, apiKey) {
       cost: 0,
       body() {
         const normalized = normalizeEin(ein);
+        const hyphenated = `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
 
         assert(/^\d{9}$/.test(normalized), `normalizeEin produced "${normalized}"`);
         assert(
-          normalizeEin(`  ${normalized.slice(0, 2)}-${normalized.slice(2)}  `) === normalized,
+          normalizeEin(`  ${hyphenated}  `) === normalized,
           'the hyphenated and padded form did not normalize to the plain one',
         );
-        assert(isValidEin(normalized) && isValidEin(`${normalized.slice(0, 2)}-${normalized.slice(2)}`),
-          'isValidEin rejected a well-formed EIN');
         assert(
-          !isValidEin('12345678') && !isValidEin(null) && !isValidEin(123456789),
+          isValidEin(normalized) && isValidEin(hyphenated),
+          'isValidEin rejected a well-formed EIN',
+        );
+        assert(
+          !isValidEin(normalized.slice(0, EIN_LENGTH - 1)) &&
+            !isValidEin(null) &&
+            !isValidEin(Number(normalized)),
           'isValidEin accepted a malformed value',
         );
 
-        // Order and duplicates survive normalization; ex-18 depends on it.
-        const supplied = ['41-1787097', '996589560', '41-1787097'];
+        // Order and duplicates survive normalization; ex-18 depends on it. The
+        // second subject is here only as an EIN that is not the first one.
+        const other = BULK_EINS[1];
+        const supplied = [hyphenated, other, hyphenated];
 
         assert(
-          normalizeEins(supplied).join(',') === '411787097,996589560,411787097',
+          normalizeEins(supplied).join(',') === [normalized, other, normalized].join(','),
           'normalizeEins reordered or deduplicated its input',
         );
 
         // Every failure is reported at once, by index, rather than the first one.
         try {
-          normalizeEins(['41-1787097', 'nope', '', '996589560']);
+          normalizeEins([hyphenated, 'nope', '', other]);
           throw new Error('normalizeEins accepted two malformed entries');
         } catch (error) {
           assert(error instanceof PactmanValidationError, 'normalizeEins raised the wrong error type');
@@ -879,8 +1011,11 @@ function localValidationChecks(ein, apiKey) {
           },
         });
 
-        const atLimit = Array.from({ length: MAX_BULK_EINS }, (_, i) => String(100000000 + i));
-        const overLimit = [...atLimit, '100000999'];
+        // Filler, counted rather than looked up: this probe never sends, so these
+        // only have to be well-formed, and no organization needs to exist.
+        const filler = index => String(10 ** (EIN_LENGTH - 1) + index);
+        const atLimit = Array.from({ length: MAX_BULK_EINS }, (_, i) => filler(i));
+        const overLimit = [...atLimit, filler(MAX_BULK_EINS)];
 
         let reached = false;
 
@@ -910,9 +1045,7 @@ function localValidationChecks(ein, apiKey) {
 
         // `dedupe` collapses before the limit applies, so a duplicate-heavy list
         // that exceeds the limit as supplied still goes out.
-        const duplicateHeavy = Array.from({ length: MAX_BULK_EINS + 10 }, (_, i) =>
-          String(100000000 + (i % 10)),
-        );
+        const duplicateHeavy = Array.from({ length: MAX_BULK_EINS + 10 }, (_, i) => filler(i % 10));
 
         let dedupedReached = false;
 
@@ -2621,6 +2754,11 @@ function printReport(groups, findings) {
 // --- main -------------------------------------------------------------------
 
 const envFile = loadEnvFile();
+
+// Before the key check, so `--help` and a bad EIN are answered without one.
+const subjects = resolveSubjects(process.argv.slice(2), envFile);
+const [EIN, BULK_EINS, MISSING_EIN] = subjects.map(subject => subject.value);
+
 const apiKey = process.env[API_KEY_ENV];
 
 if (!apiKey) {
@@ -2639,7 +2777,16 @@ const freeChecks = plan.filter(check => check.cost === 0).length;
 
 say(`Target        ${baseUrl}`);
 say(`Key           from ${keySource(envFile)} (${apiKey.length} characters, never printed)`);
-say(`Subjects      ${EIN} · bulk ${BULK_EINS.join(', ')} · no record ${MISSING_EIN}`);
+const ignoredSubjects = subjects.flatMap(subject => subject.ignored);
+
+say(
+  `Subjects      ${EIN} · bulk ${BULK_EINS.join(', ')} · no record ${MISSING_EIN}` +
+    ` (from ${[...new Set(subjects.map(subject => subject.source))].join(', ')})`,
+);
+
+if (ignoredSubjects.length > 0) {
+  say(`              ${ignoredSubjects.join(', ')} not used — the bulk probes read the first ${BULK_EINS.length}`);
+}
 say(`Plan          ${plan.length} checks across ${examples.length} example files, ${freeChecks} of them free`);
 say(`Cost          ${plannedCost} billable API checks, charged to this key`);
 say('');
