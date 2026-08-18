@@ -22,3 +22,7 @@ build/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Recorded per-key: the subjects a baseline describes come from whoever ran it,
+# so a committed one only ever matches its recorder and skips for everyone else.
+nodejs/scripts/contract-baseline.json

@@ -227,7 +227,10 @@ function loadEnvFile() {
 
   const names = new Set();
 
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
+  // Both line endings: a .env saved on Windows ends its lines with CRLF, and
+  // `.` in the pattern below does not match the CR, so every line would fail
+  // to parse and a file full of variables would look empty.
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
     const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
 
     if (!match) {
