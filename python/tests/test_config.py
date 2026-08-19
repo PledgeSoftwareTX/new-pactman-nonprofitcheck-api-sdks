@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, cast
-
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib
 
 from conftest import TEST_API_KEY, Stub, TransportMock, client_with, envelope
 from pactman_nonprofit_check_plus import (
@@ -181,4 +180,4 @@ class TestUserAgent:
 
 def _pyproject() -> dict[str, Any]:
     with PYPROJECT.open("rb") as handle:
-        return cast(dict[str, Any], tomllib.load(handle))
+        return tomllib.load(handle)
