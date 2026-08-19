@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import sys
+
 import pytest
-import tomllib
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from conftest import TEST_API_KEY, Stub, TransportMock, client_with, envelope
 from pactman_nonprofit_check_plus import (
