@@ -71,6 +71,9 @@ import {
   supportedEnvironments,
 } from '@pactmandev/nonprofit-check-plus';
 import {
+  composeExpected,
+  contractDiff,
+  coverageDiff,
   formatChanges,
   schemaDiff,
   signatureOf,
@@ -284,13 +287,13 @@ const EXAMPLES_DIR = new URL('../examples/', import.meta.url);
 
 /**
  * The checks that are not answering for an example file. The response contract
- * is the API's own shape held against a recording of it — drift there is not
- * something any example claims, and it gets its own heading rather than being
- * filed under one.
+ * is the live shape held against `src/response-contract.json` — whether the API
+ * still matches what this package predicts is not something any one example
+ * claims, so it gets its own heading rather than being filed under one.
  */
 const CONTRACT_GROUP = {
   id: 'contract',
-  title: 'the live response held against the recorded baseline',
+  title: 'the live response held against what this package predicts',
 };
 
 const NUMBERED = /^ex-\d{2}-/;
@@ -2080,36 +2083,54 @@ function bulkChecks(eins) {
   return checks;
 }
 
-// --- checks: the raw response contract --------------------------------------
+// --- checks: the response against what this package predicts -----------------
 
 /**
- * Four checks that hold the raw JSON this run received against a recorded
- * baseline: the schema and the types of the single-check response, and the same
- * two for bulk.
+ * Five checks that hold the raw JSON this run received against
+ * `src/response-contract.json` — the shape this package predicts, and tells its
+ * users to expect.
  *
  * Everything else in this file asserts what the SDK does with a response. These
- * assert that the response itself has not moved — a field the API stopped
- * sending, one it started sending, one that changed from a boolean to a string
- * or from `M/D/YYYY h:mm:ss AM` to ISO. None of it is knowable from the SDK's
- * own types, which are permissive by design so a server-side change cannot break
- * deserialization; this is where such a change is meant to become visible.
+ * assert that the response is the one the SDK was written for: a field that
+ * changed from a boolean to a string, a timestamp that turned ISO, a field the
+ * API started sending that the package has never heard of. None of it is
+ * knowable from the SDK's own types at runtime — they are erased, and permissive
+ * by design so a server-side change cannot break deserialization — so this is
+ * where such a change is meant to become visible.
+ *
+ * The contract is checked in and identical for everyone, because it is derived
+ * from `src/types.ts` rather than from any one account's data. That is what lets
+ * these checks fail on the first run rather than needing a recording to compare
+ * against, and what makes a failure mean something specific: not "the API
+ * changed" but "the API no longer matches what we promise".
  *
  * Free. Both responses were already fetched and paid for by the checks above.
  *
- * The first run against a deployment has nothing to compare to, so it records
- * what it saw and says so; every run after that is a comparison. A fifth entry
- * writes the file when there is something new to write, and stands down when
- * there is not.
- *
- * The baseline holds shapes only — path, type and value format, never a value —
- * so it is safe to commit and a failure is safe to print. See `contract.mjs`.
+ * A sixth check still records the observed shape to `contract-baseline.json`,
+ * which is per-key and untracked. It never fails the run. Its one remaining job
+ * is to notice value-format drift on fields the contract deliberately leaves as
+ * `string`, where the package makes no promise to break.
  */
 function contractChecks() {
+  const contractPath = fileURLToPath(new URL('../src/response-contract.json', import.meta.url));
   const baselinePath = fileURLToPath(new URL('./contract-baseline.json', import.meta.url));
 
   /** Read once, on the first check that needs it. */
+  let contract;
+
+  function loadContract() {
+    if (contract === undefined) {
+      try {
+        contract = JSON.parse(readFileSync(contractPath, 'utf8'));
+      } catch (error) {
+        throw new Error(`${basename(contractPath)} is not readable JSON: ${error.message}`);
+      }
+    }
+
+    return contract;
+  }
+
   let baseline;
-  let baselineError = null;
 
   function loadBaseline() {
     if (baseline === undefined) {
@@ -2118,8 +2139,8 @@ function contractChecks() {
       if (existsSync(baselinePath)) {
         try {
           baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
-        } catch (error) {
-          baselineError = `${basename(baselinePath)} is not readable JSON: ${error.message}`;
+        } catch {
+          baseline = null;
         }
       }
     }
@@ -2127,7 +2148,7 @@ function contractChecks() {
     return baseline;
   }
 
-  /** Signatures this run observed, by endpoint. Built once, read by both checks. */
+  /** Signatures this run observed, by endpoint. Built once, read by every check. */
   const observed = {};
 
   function observe(runner, kind) {
@@ -2157,41 +2178,15 @@ function contractChecks() {
   }
 
   /**
-   * A baseline recorded against a different organization, or a different batch,
-   * describes a different record. Comparing the two would report data variation
-   * as API drift, so the checks stand down instead.
-   */
-  function subjectMismatch(recorded, subject) {
-    if (subject.ein && recorded.ein && recorded.ein !== subject.ein) {
-      return `the baseline was recorded for EIN ${recorded.ein}, this run used ${subject.ein}`;
-    }
-
-    if (subject.eins && recorded.eins && recorded.eins.join(',') !== subject.eins.join(',')) {
-      return (
-        `the baseline was recorded for EINs ${recorded.eins.join(', ')}, ` +
-        `this run used ${subject.eins.join(', ')}`
-      );
-    }
-
-    return null;
-  }
-
-  /** Endpoints whose signature has to be written out at the end of the run. */
-  const pending = new Set();
-
-  let announcedTarget = false;
-
-  /**
-   * Both checks on an endpoint do the same work along different axes: signature
-   * of what arrived, held against the recorded one by `diff`.
+   * Both checks on an endpoint do the same work along different axes: the
+   * signature of what arrived, held against the contract by `diff`.
    *
-   * With nothing recorded for this endpoint yet, there is nothing to hold it
-   * against, so this run becomes the baseline. That is the whole first-run
-   * ceremony: run it, and from the next run on the comparison is live. Deleting
-   * the file is how a recording is redone, and deleting it is deliberate work —
-   * re-recording discards the evidence a comparison would have given.
+   * There is no first-run ceremony. The contract is already on disk before the
+   * first request goes out, so the first run is a real comparison — which is the
+   * whole difference between checking against a prediction and checking against
+   * a recording of the thing being predicted.
    */
-  function against({ kind, name, diff, describe }) {
+  function against({ kind, name, diff, fail, describe }) {
     return {
       covers: ['contract'],
       name,
@@ -2203,54 +2198,20 @@ function contractChecks() {
           return { status: 'skip', detail: current.missing };
         }
 
+        const expected = composeExpected(loadContract(), kind);
+        const result = diff(expected, current.signature);
         const paths = Object.keys(current.signature).length;
-        const stored = loadBaseline();
-
-        if (baselineError) {
-          throw new Error(baselineError);
-        }
-
-        const recorded = stored?.[kind]?.signature ? stored[kind] : null;
-
-        if (!recorded) {
-          pending.add(kind);
-
-          return {
-            detail: `${paths} paths recorded — the next run checks against them`,
-            data: { paths, recorded: true },
-          };
-        }
-
-        const mismatch = subjectMismatch(recorded, current.subject);
-
-        if (mismatch) {
-          return { status: 'skip', detail: `${mismatch} — the two describe different records` };
-        }
-
-        const recordedBaseUrl = recorded.baseUrl ?? stored.baseUrl;
-
-        if (!announcedTarget && recordedBaseUrl && recordedBaseUrl !== runner.client.baseUrl) {
-          announcedTarget = true;
-          runner.note(
-            name,
-            `the baseline was recorded against ${recordedBaseUrl}; this run targeted ${runner.client.baseUrl}, ` +
-              'so a difference may be between deployments rather than over time',
-          );
-        }
-
-        const result = diff(recorded.signature, current.signature);
 
         assert(
           result.total === 0,
-          `the live ${kind} response no longer matches ${basename(baselinePath)} — ` +
-            `${summarizeChanges(result.changes)}\n${formatChanges(result.changes)}\n` +
-            `      delete ${basename(baselinePath)} and re-run to re-record, ` +
+          `${fail(kind)} — ${summarizeChanges(result.changes)}\n${formatChanges(result.changes)}\n` +
+            `      reconcile src/types.ts and ${basename(contractPath)} with the API, ` +
             'once the change is understood and intended',
         );
 
         return {
-          detail: `${describe(paths)} · ${baselineAge(recorded, stored)}`,
-          data: { paths, recordedAt: recorded.recordedAt ?? stored.recordedAt ?? null },
+          detail: describe(paths, result, expected),
+          data: { paths, predicted: Object.keys(expected).length },
         };
       },
     };
@@ -2259,85 +2220,131 @@ function contractChecks() {
   const checks = [
     against({
       kind: 'single',
-      name: 'single response schema',
-      diff: schemaDiff,
-      describe: paths => `${paths} paths, none added or removed`,
+      name: 'single response types',
+      diff: contractDiff,
+      fail: () => 'the live single response carries values this package does not predict',
+      describe: paths => `${paths} paths carry the predicted types and value formats`,
     }),
     against({
       kind: 'single',
-      name: 'single response types',
-      diff: typeDiff,
-      describe: paths => `${paths} paths carry the recorded types and value formats`,
-    }),
-    against({
-      kind: 'bulk',
-      name: 'bulk response schema',
-      diff: schemaDiff,
-      describe: paths => `${paths} paths, none added or removed`,
+      name: 'single response fields',
+      diff: coverageDiff,
+      fail: () => 'the live single response has fields this package does not predict',
+      describe: (paths, result) =>
+        `${paths} paths, all predicted · ${result.unobserved} predicted but not returned for this record`,
     }),
     against({
       kind: 'bulk',
       name: 'bulk response types',
-      diff: typeDiff,
-      describe: paths => `${paths} paths carry the recorded types and value formats`,
+      diff: contractDiff,
+      fail: () => 'the live bulk response carries values this package does not predict',
+      describe: paths => `${paths} paths carry the predicted types and value formats`,
+    }),
+    against({
+      kind: 'bulk',
+      name: 'bulk response fields',
+      diff: coverageDiff,
+      fail: () => 'the live bulk response has fields this package does not predict',
+      describe: (paths, result) =>
+        `${paths} paths, all predicted · ${result.unobserved} predicted but not returned for this batch`,
     }),
   ];
 
+  /**
+   * Shape drift against this account's own last run.
+   *
+   * The contract checks above are the authority on whether the API still matches
+   * what the package promises. This one answers a narrower question they cannot:
+   * whether a value's *form* moved on a field the contract leaves as `string` —
+   * a code that gained a digit, a free-text field that started arriving empty.
+   * The package promises nothing there, so nothing is broken and nothing fails;
+   * it is worth seeing, and that is all.
+   *
+   * The recording is per-key and per-organization, so it is untracked. Comparing
+   * two accounts' recordings would report their different data as drift.
+   */
   checks.push({
     covers: ['contract'],
-    name: 'baseline',
+    name: 'shape drift since last run',
     cost: 0,
     body(runner) {
-      const previous = loadBaseline() ?? {};
-      const written = ['single', 'bulk'].filter(
-        kind => pending.has(kind) && observed[kind]?.signature,
-      );
+      const previous = loadBaseline();
+      const recorded = ['single', 'bulk'].filter(kind => observed[kind]?.signature);
 
-      if (written.length === 0) {
-        return {
-          status: 'skip',
-          detail: `${basename(baselinePath)} already covers what this run observed`,
-        };
+      if (recorded.length === 0) {
+        return { status: 'skip', detail: 'no response was returned to record' };
       }
 
-      // Only what this run recorded is rewritten. An endpoint that was checked,
-      // or that this run never reached, keeps the shape already on file — a
-      // failed comparison must not quietly become the new baseline.
-      const recordFor = kind =>
-        written.includes(kind)
-          ? {
-              recordedAt: new Date().toISOString(),
-              baseUrl: runner.client.baseUrl,
-              sdkVersion: VERSION,
-              ...observed[kind].subject,
-              signature: observed[kind].signature,
-            }
-          : (previous[kind] ?? null);
+      const drifted = [];
+      const compared = [];
 
-      const kept = ['single', 'bulk'].filter(
-        kind => !written.includes(kind) && previous[kind]?.signature,
-      );
+      for (const kind of recorded) {
+        const before = previous?.[kind];
+
+        // No recording for this endpoint, or one describing other organizations:
+        // either way there is nothing this run can be held against. Saying
+        // "unchanged" here would claim a comparison that never happened.
+        if (!before?.signature || subjectMismatch(before, observed[kind].subject)) {
+          continue;
+        }
+
+        compared.push(kind);
+
+        const schema = schemaDiff(before.signature, observed[kind].signature);
+        const types = typeDiff(before.signature, observed[kind].signature);
+        const changes = [...schema.changes, ...types.changes];
+
+        if (changes.length > 0) {
+          drifted.push({ kind, changes });
+          runner.note(
+            'shape drift since last run',
+            `${kind}: ${summarizeChanges(changes)} since ${before.recordedAt ?? 'the last recording'}\n${formatChanges(changes)}`,
+          );
+        }
+      }
 
       writeFileSync(
         baselinePath,
         `${JSON.stringify(
           {
             note:
-              'Shape of the live API responses: path, JSON type and value format, no values. ' +
-              'Recorded on first run; delete this file and re-run to re-record.',
-            single: recordFor('single'),
-            bulk: recordFor('bulk'),
+              'Shape of the live API responses on the last run of this key: path, JSON type and ' +
+              'value format, no values. Untracked and per-key; the promise this is checked ' +
+              'against lives in src/response-contract.json.',
+            ...Object.fromEntries(
+              ['single', 'bulk'].map(kind => [
+                kind,
+                recorded.includes(kind)
+                  ? {
+                      recordedAt: new Date().toISOString(),
+                      baseUrl: runner.client.baseUrl,
+                      sdkVersion: VERSION,
+                      ...observed[kind].subject,
+                      signature: observed[kind].signature,
+                    }
+                  : (previous?.[kind] ?? null),
+              ]),
+            ),
           },
           null,
           2,
         )}\n`,
       );
 
+      if (drifted.length > 0) {
+        return {
+          status: 'warn',
+          detail: `${drifted.map(one => one.kind).join(' and ')} moved since the last run of this key`,
+          data: { drifted: drifted.map(one => one.kind), compared },
+        };
+      }
+
       return {
         detail:
-          `${written.join(' and ')} written to ${basename(baselinePath)} — commit it` +
-          (kept.length > 0 ? ` · ${kept.join(' and ')} left as recorded` : ''),
-        data: { written, kept },
+          compared.length > 0
+            ? `${compared.join(' and ')} unchanged since the last run of this key`
+            : `${recorded.join(' and ')} recorded for these subjects — the next run compares`,
+        data: { drifted: [], compared },
       };
     },
   });
@@ -2345,13 +2352,24 @@ function contractChecks() {
   return checks;
 }
 
-/** How old the recorded baseline is, for the detail line. */
-function baselineAge(recorded, stored) {
-  const recordedAt = Date.parse(recorded.recordedAt ?? stored.recordedAt ?? '');
+/**
+ * A recording made against a different organization, or a different batch,
+ * describes a different record. Comparing the two would report data variation as
+ * drift, so the drift check stands down instead.
+ */
+function subjectMismatch(recorded, subject) {
+  if (subject.ein && recorded.ein && recorded.ein !== subject.ein) {
+    return `the recording was made for EIN ${recorded.ein}, this run used ${subject.ein}`;
+  }
 
-  return Number.isNaN(recordedAt)
-    ? 'baseline of unknown age'
-    : `baseline ${ageInDays(recordedAt)}d old`;
+  if (subject.eins && recorded.eins && recorded.eins.join(',') !== subject.eins.join(',')) {
+    return (
+      `the recording was made for EINs ${recorded.eins.join(', ')}, ` +
+      `this run used ${subject.eins.join(', ')}`
+    );
+  }
+
+  return null;
 }
 
 // --- checks: rechecking the same record (ex-28..ex-30) ----------------------

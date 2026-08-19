@@ -9,6 +9,8 @@
  * Field names and values mirror the shapes documented in the Pactman API
  * reference. The EINs are illustrative and are not real organizations.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /** The two OFAC sentences the API returns. It reports prose, not a boolean. */
 export const OFAC_NO_MATCH =
@@ -375,14 +377,19 @@ export const FIXTURE_ORGANIZATIONS = {
 };
 
 /**
- * Every field the documented schema defines on an organization.
+ * Every field this package predicts on an organization.
  *
- * Used to detect drift: anything the live API returns that is not in this set is
- * a field newer than this SDK. That is not an error — see `ex-25` — but it is
- * worth knowing about.
+ * Read from `src/response-contract.json` rather than from a fixture, so that
+ * what the SDK claims to know is stated in one place. A fixture is an example of
+ * a record; the contract is the promise, and the promise is what drift is
+ * measured against. See `ex-25`: a field outside this set is newer than this
+ * SDK, which is not an error, but is worth knowing about.
  */
 export const KNOWN_NONPROFIT_FIELDS = new Set(
-  Object.keys(FIXTURE_ORGANIZATIONS[FIXTURE_EINS.publicCharity]),
+  Object.keys(
+    JSON.parse(readFileSync(fileURLToPath(new URL('../src/response-contract.json', import.meta.url)), 'utf8'))
+      .nonprofit,
+  ),
 );
 
 /** True when the mock server has a record for this EIN. */

@@ -258,3 +258,142 @@ export function formatChanges(changes, { indent = '      ', limit = 12 } = {}) {
 
   return shown.map(line => `${indent}${line}`).join('\n');
 }
+
+// --- the package's own prediction -------------------------------------------
+
+/**
+ * Everything above compares one live response against another recorded earlier,
+ * which answers "did the API move?" but never "does the API still match what
+ * this package tells its users?". The second question is the one with a caller
+ * on the other end of it: `src/types.ts` promises `bmf_status` is a boolean, and
+ * a user writes `if (bmf.status)` on the strength of that promise. Nothing in a
+ * self-recorded baseline can notice when the API disagrees, because the baseline
+ * is the API's own output — it agrees with itself by construction.
+ *
+ * `src/response-contract.json` is the other side of that comparison: the shape
+ * this package predicts, in the same token vocabulary as a signature so the two
+ * can be held against each other directly. It is checked in, identical for
+ * everyone, and derived from the declared types rather than from anyone's
+ * account — so a diff to it is a deliberate change to what the SDK promises,
+ * reviewable as such, rather than a record of what one organization looked like
+ * on one afternoon.
+ */
+
+/** String tokens `string` stands for, when the package claims no format. */
+const STRING_TOKENS = new Set(['text', 'date', 'date:iso', 'url', 'ofac-sentence', 'empty']);
+
+function isStringToken(token) {
+  return STRING_TOKENS.has(token) || token.startsWith('digits:');
+}
+
+/**
+ * Whether an observed token is one the contract allows.
+ *
+ * `string` is a wildcard over every string token, because a declared `string`
+ * makes no claim about the form of the value. Where the package does make one —
+ * an EIN is nine digits, a timestamp is `M/D/YYYY h:mm:ss AM` — the contract
+ * names that token instead, and a value that stops matching it fails even though
+ * it is still, technically, a string. That is the point: a timestamp that turns
+ * ISO breaks every caller parsing it, and the declared type never notices.
+ */
+export function permits(allowed, token) {
+  const tokens = allowed.split('|');
+
+  return tokens.includes(token) || (tokens.includes('string') && isStringToken(token));
+}
+
+/**
+ * The flat expected signature for one endpoint, built from the shared parts.
+ *
+ * The record is described once and used for both endpoints, so single and bulk
+ * cannot drift apart in the contract the way they can on the wire — where
+ * `bmf_status` arrives as a string from one and a boolean from the other. One
+ * description means one of those two has to be reported as wrong.
+ */
+export function composeExpected(contract, kind) {
+  const single = kind === 'single';
+  const prefix = single ? 'data.' : 'data[].';
+
+  const expected = {
+    ...contract.envelope,
+    data: single ? 'null|object' : 'array|null',
+    'errors[]': 'object',
+    'errors[].eins[]': 'string',
+  };
+
+  for (const [field, token] of Object.entries(contract.errorDetail)) {
+    expected[`errors[].${field}`] = token;
+  }
+
+  if (!single) {
+    expected['data[]'] = 'object';
+  }
+
+  for (const [field, token] of Object.entries(contract.nonprofit)) {
+    expected[`${prefix}${field}`] = token;
+  }
+
+  expected[`${prefix}organization_types[]`] = 'object';
+
+  for (const [field, token] of Object.entries(contract.organizationType)) {
+    expected[`${prefix}organization_types[].${field}`] = token;
+  }
+
+  return Object.fromEntries(
+    Object.entries(expected).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+  );
+}
+
+/**
+ * Paths the live response carries a value the contract permits no form of.
+ *
+ * Paths the contract has never heard of are {@link coverageDiff}'s to report, so
+ * a field the API invented is one failure rather than two.
+ */
+export function contractDiff(expected, observed) {
+  const changes = [];
+
+  for (const [path, token] of Object.entries(observed)) {
+    const allowed = expected[path];
+
+    if (allowed === undefined) {
+      continue;
+    }
+
+    const offending = token.split('|').filter(one => !permits(allowed, one));
+
+    if (offending.length > 0) {
+      changes.push({ kind: 'changed', path, from: allowed, to: offending.join('|') });
+    }
+  }
+
+  return { changes: sortChanges(changes), total: changes.length };
+}
+
+/**
+ * Fields the API sent that the package does not predict.
+ *
+ * The index signature on `Nonprofit` means these are readable by a caller who
+ * knows to look, and invisible to one who does not — which is the state this
+ * check exists to end. An unpredicted field is a prediction gone stale, not a
+ * broken response, so it is reported on its own.
+ *
+ * The reverse — a path the contract predicts and the response omitted — is not
+ * a change. Every declared field is optional, and a record simply having no OFAC
+ * finding is not the API moving. Only the count of those is surfaced.
+ */
+export function coverageDiff(expected, observed) {
+  const changes = [];
+
+  for (const [path, token] of Object.entries(observed)) {
+    if (!Object.hasOwn(expected, path)) {
+      changes.push({ kind: 'added', path, token });
+    }
+  }
+
+  return {
+    changes: sortChanges(changes),
+    total: changes.length,
+    unobserved: Object.keys(expected).filter(path => !Object.hasOwn(observed, path)).length,
+  };
+}
