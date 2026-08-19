@@ -1,0 +1,61 @@
+name: publish-python
+
+# Publishes python/ to PyPI when a tag like `python-v1.0.0` is pushed.
+# The tag prefix keeps this from firing for SDKs in other languages.
+
+on:
+  push:
+    tags: ['python-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for PyPI trusted publishing
+
+defaults:
+  run:
+    working-directory: python
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: create an environment of this name in repo settings to require
+    # a manual approval before anything reaches PyPI. Delete if not wanted.
+    environment: pypi-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: python -m pip install --upgrade pip build && pip install -e ".[dev]"
+
+      - name: Fail if the tag and pyproject.toml disagree
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#python-v}"
+          PKG_VERSION="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag says $TAG_VERSION but pyproject.toml says $PKG_VERSION."
+            exit 1
+          fi
+
+      - run: ruff check .
+      - run: mypy
+      - run: pytest
+      - run: python scripts/run_examples_against_mock.py
+
+      - name: Build the distributions
+        run: python -m build
+
+      # Trusted publishing: register this repo and workflow as a trusted
+      # publisher on pypi.org, and no API token is needed. To fall back to a
+      # token instead, set the PYPI_API_TOKEN secret and add
+      # `password: ${{ secrets.PYPI_API_TOKEN }}` below.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist
