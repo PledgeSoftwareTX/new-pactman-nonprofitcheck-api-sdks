@@ -31,7 +31,7 @@
  * or in `nodejs/.env`; PACTMAN_BASE_URL aims the run at a deployment other than
  * production, which is how it is run against the mock server.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
@@ -71,15 +71,16 @@ import {
   supportedEnvironments,
 } from '@pactmandev/nonprofit-check-plus';
 import {
+  baselineDiff,
   composeExpected,
   contractDiff,
   coverageDiff,
   formatChanges,
-  schemaDiff,
+  requiredPathsOf,
   signatureOf,
   summarizeChanges,
-  typeDiff,
 } from './contract.mjs';
+import { API_KEY_ENV, BULK_PROBE_LIMIT, loadEnvFile } from './env.mjs';
 import { KNOWN_NONPROFIT_FIELDS } from './fixtures.mjs';
 
 /**
@@ -106,8 +107,8 @@ const SUBJECTS = [
     name: 'bulk-eins',
     variable: 'PACTMAN_SMOKE_BULK_EIN',
     purpose: 'comma-separated, two or more, for the batch, order and duplicate probes',
-    // The bulk probes read the first three; the rest would cost quota unspent.
-    list: { min: 2, max: 3 },
+    // The bulk probes read the first few; the rest would cost quota unspent.
+    list: { min: 2, max: BULK_PROBE_LIMIT },
   },
   {
     name: 'missing-ein',
@@ -203,55 +204,11 @@ function resolveSubjects(args, envFile) {
   return resolved;
 }
 
-/** The variable the credential is read from, in the environment or in `.env`. */
-const API_KEY_ENV = 'PACTMAN_API_KEY';
-
 /** Sent where a key is meant to be rejected. Synthetic, so it cannot be valid. */
 const INVALID_API_KEY = 'pactman-smoke-test-invalid-key';
 
 /** Ceiling on the burst the rate-limit probe is allowed to send. */
 const RATE_LIMIT_ATTEMPTS = 10;
-
-// --- environment file -------------------------------------------------------
-
-/**
- * Loads `nodejs/.env`, so the key and any standing overrides live in a file
- * rather than in the shell for every run. The file is gitignored.
- *
- * A variable already in the environment wins: exporting one for a single run
- * must not be silently overridden by a file someone set up months ago.
- */
-function loadEnvFile() {
-  const path = fileURLToPath(new URL('../.env', import.meta.url));
-
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  const names = new Set();
-
-  // Both line endings: a .env saved on Windows ends its lines with CRLF, and
-  // `.` in the pattern below does not match the CR, so every line would fail
-  // to parse and a file full of variables would look empty.
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-
-    if (!match) {
-      continue;
-    }
-
-    const [, name, rawValue] = match;
-
-    if (process.env[name] !== undefined) {
-      continue;
-    }
-
-    process.env[name] = rawValue.trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
-    names.add(name);
-  }
-
-  return { path, names };
-}
 
 // --- secret handling --------------------------------------------------------
 
@@ -286,14 +243,16 @@ function keySource(envFile) {
 const EXAMPLES_DIR = new URL('../examples/', import.meta.url);
 
 /**
- * The checks that are not answering for an example file. The response contract
- * is the live shape held against `src/response-contract.json` — whether the API
- * still matches what this package predicts is not something any one example
- * claims, so it gets its own heading rather than being filed under one.
+ * The checks that are not answering for an example file. They hold the live
+ * shape against `src/response-contract.json`, what this package promises, and
+ * against `src/response-baseline.json`, what production returned when it was
+ * recorded. Whether the API still matches either is not something any one
+ * example claims, so they get their own heading rather than being filed under
+ * one.
  */
 const CONTRACT_GROUP = {
   id: 'contract',
-  title: 'the live response held against what this package predicts',
+  title: 'the live response against the contract and the recording',
 };
 
 const NUMBERED = /^ex-\d{2}-/;
@@ -404,7 +363,48 @@ function groupByExample(examples, entries) {
 
 // --- the runner -------------------------------------------------------------
 
+/**
+ * ANSI colour, when there is someone there to see it.
+ *
+ * This report is read by eye far more often than it is piped, and a failed
+ * check that looks exactly like a passed one is a failed check that gets
+ * scrolled past. Off when stdout is not a terminal, when NO_COLOR is set
+ * (no-color.org) or when TERM says dumb — a redirected log stays plain text,
+ * with no escape sequences to confuse whatever reads it next. FORCE_COLOR
+ * overrides all of that, for a CI log that is rendered with colour even though
+ * nothing it is written to is a terminal.
+ */
+const COLOR =
+  process.env.NO_COLOR
+    ? false
+    : Boolean(process.env.FORCE_COLOR) ||
+      (process.stdout.isTTY === true && process.env.TERM !== 'dumb');
+
+const CODES = { red: 31, green: 32, yellow: 33, dim: 2 };
+
+function paint(colour, text) {
+  return COLOR && colour ? `\u001b[${CODES[colour]}m${text}\u001b[0m` : text;
+}
+
 const STATUS = { pass: '✓', fail: '✗', warn: '!', skip: '–' };
+
+/**
+ * How each status is coloured. A pass gets a green mark and plain text — a
+ * report that is mostly passes should read as text, not as a wall of green —
+ * while a failure is red for its whole line, mark and message together, because
+ * the message is the part worth finding.
+ */
+const STATUS_COLOR = { pass: null, fail: 'red', warn: 'yellow', skip: 'dim' };
+
+/** The status mark, coloured. */
+function mark(status) {
+  return paint(status === 'pass' ? 'green' : STATUS_COLOR[status], STATUS[status]);
+}
+
+/** A line of report text, in the colour its status calls for. */
+function tint(status, text) {
+  return paint(STATUS_COLOR[status], text);
+}
 
 class Runner {
   constructor(apiKey) {
@@ -1861,7 +1861,7 @@ function forwardCompatibilityChecks() {
 // --- checks: bulk (ex-17..ex-21) --------------------------------------------
 
 function bulkChecks(eins) {
-  const bulkEins = eins.slice(0, Math.min(eins.length, 3));
+  const bulkEins = eins.slice(0, Math.min(eins.length, BULK_PROBE_LIMIT));
   const duplicateProbe = eins.length >= 2 ? [eins[1], eins[0], eins[1]] : null;
   const checks = [];
 
@@ -2086,34 +2086,37 @@ function bulkChecks(eins) {
 // --- checks: the response against what this package predicts -----------------
 
 /**
- * Five checks that hold the raw JSON this run received against
- * `src/response-contract.json` — the shape this package predicts, and tells its
- * users to expect.
+ * Six checks that hold the raw JSON this run received against the two documents
+ * that describe what it is supposed to look like.
  *
  * Everything else in this file asserts what the SDK does with a response. These
  * assert that the response is the one the SDK was written for: a field that
  * changed from a boolean to a string, a timestamp that turned ISO, a field the
- * API started sending that the package has never heard of. None of it is
- * knowable from the SDK's own types at runtime — they are erased, and permissive
- * by design so a server-side change cannot break deserialization — so this is
- * where such a change is meant to become visible.
+ * API started sending that the package has never heard of, a field it stopped
+ * sending. None of it is knowable from the SDK's own types at runtime — they are
+ * erased, and permissive by design so a server-side change cannot break
+ * deserialization — so this is where such a change is meant to become visible.
  *
- * The contract is checked in and identical for everyone, because it is derived
- * from `src/types.ts` rather than from any one account's data. That is what lets
- * these checks fail on the first run rather than needing a recording to compare
- * against, and what makes a failure mean something specific: not "the API
- * changed" but "the API no longer matches what we promise".
+ * The two documents answer different questions and both fail the run.
+ *
+ * `src/response-contract.json` is what this package *promises*, derived from
+ * `src/types.ts`. A failure there means the API no longer matches what the SDK
+ * tells its users to expect. It is checked in and identical for everyone, which
+ * is what lets these checks fail on the very first run rather than needing a
+ * recording to compare against.
+ *
+ * `src/response-baseline.json` is what production *returned*, recorded once by
+ * `npm run baseline:record` and committed. A failure there means production
+ * moved — in any direction, including in the fields the contract deliberately
+ * leaves as a bare `string`, where the promise is too loose to notice anything.
+ * The recording is never written by a run: a baseline that rewrites itself
+ * agrees with the API by construction and can never fail.
  *
  * Free. Both responses were already fetched and paid for by the checks above.
- *
- * A sixth check still records the observed shape to `contract-baseline.json`,
- * which is per-key and untracked. It never fails the run. Its one remaining job
- * is to notice value-format drift on fields the contract deliberately leaves as
- * `string`, where the package makes no promise to break.
  */
 function contractChecks() {
   const contractPath = fileURLToPath(new URL('../src/response-contract.json', import.meta.url));
-  const baselinePath = fileURLToPath(new URL('./contract-baseline.json', import.meta.url));
+  const baselinePath = fileURLToPath(new URL('../src/response-baseline.json', import.meta.url));
 
   /** Read once, on the first check that needs it. */
   let contract;
@@ -2132,16 +2135,24 @@ function contractChecks() {
 
   let baseline;
 
+  /**
+   * The committed recording. An unreadable or absent one is a failure, not a
+   * shrug: the whole point of the file is that every run is held against it, and
+   * a run that silently passes for want of one is the state this replaced.
+   */
   function loadBaseline() {
     if (baseline === undefined) {
-      baseline = null;
+      if (!existsSync(baselinePath)) {
+        throw new Error(
+          `src/${basename(baselinePath)} is missing — record it against production with ` +
+            '`npm run baseline:record` and commit it',
+        );
+      }
 
-      if (existsSync(baselinePath)) {
-        try {
-          baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
-        } catch {
-          baseline = null;
-        }
+      try {
+        baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+      } catch (error) {
+        throw new Error(`src/${basename(baselinePath)} is not readable JSON: ${error.message}`);
       }
     }
 
@@ -2157,12 +2168,10 @@ function contractChecks() {
         kind === 'single'
           ? {
               raw: runner.singleResult?.raw,
-              subject: { ein: runner.singleResult?.nonprofit?.ein ?? null },
               missing: 'the single check did not return a response',
             }
           : {
               raw: runner.bulkResult?.raw,
-              subject: { eins: (runner.bulkSubmitted ?? []).map(value => normalizeEin(value)) },
               missing: runner.freeTierKey
                 ? 'this key restricts bulk EINs to an allowlist, so no bulk response was returned'
                 : 'the bulk check did not return a response',
@@ -2171,7 +2180,7 @@ function contractChecks() {
       observed[kind] =
         source.raw === undefined
           ? { missing: source.missing }
-          : { subject: source.subject, signature: signatureOf(source.raw) };
+          : { signature: signatureOf(source.raw) };
     }
 
     return observed[kind];
@@ -2199,7 +2208,7 @@ function contractChecks() {
         }
 
         const expected = composeExpected(loadContract(), kind);
-        const result = diff(expected, current.signature);
+        const result = diff(expected, current.signature, requiredPathsOf(loadContract(), kind));
         const paths = Object.keys(current.signature).length;
 
         assert(
@@ -2217,7 +2226,63 @@ function contractChecks() {
     };
   }
 
-  const checks = [
+  /**
+   * The same response, held against the committed recording of production.
+   *
+   * Strict in both directions on the shape: a path that appeared, a path that
+   * disappeared, a value whose form moved. What it does not fail on is the part
+   * a recording has no standing to judge — whether a nullable field happened to
+   * carry a value, and the paths under a parent that arrived null. A baseline is
+   * one organization on one afternoon, and those differ between two green runs
+   * against the same unchanged deployment. `baselineDiff` sets that line; the
+   * counts it passed over are printed either way, so nothing is hidden.
+   */
+  function againstBaseline(kind) {
+    return {
+      covers: ['contract'],
+      name: `${kind} response vs recording`,
+      cost: 0,
+      body(runner) {
+        const current = observe(runner, kind);
+
+        if (current.missing) {
+          return { status: 'skip', detail: current.missing };
+        }
+
+        const recording = loadBaseline();
+        const before = recording[kind];
+
+        assert(
+          before?.signature,
+          `no ${kind} shape is recorded in src/${basename(baselinePath)} — ` +
+            'record it against production with `npm run baseline:record` and commit it',
+        );
+
+        const result = baselineDiff(before.signature, current.signature);
+
+        assert(
+          result.total === 0,
+          `the live ${kind} response no longer matches the recording made from ` +
+            `${recording.baseUrl ?? 'production'} on ${recording.recordedAt ?? 'an earlier date'} — ` +
+            `${summarizeChanges(result.changes)}\n${formatChanges(result.changes)}\n` +
+            '      if production moved and the move is intended, re-record with ' +
+            '`npm run baseline:record` and commit the diff',
+        );
+
+        const paths = Object.keys(current.signature).length;
+
+        return {
+          detail:
+            `${paths} paths, matching the recording · ` +
+            `${result.nullable} differ only in whether a value arrived · ` +
+            `${result.unreachable} under a null or empty parent`,
+          data: { paths, nullable: result.nullable, unreachable: result.unreachable },
+        };
+      },
+    };
+  }
+
+  return [
     against({
       kind: 'single',
       name: 'single response types',
@@ -2229,9 +2294,10 @@ function contractChecks() {
       kind: 'single',
       name: 'single response fields',
       diff: coverageDiff,
-      fail: () => 'the live single response has fields this package does not predict',
+      fail: () => 'the live single response and this package disagree on which fields exist',
       describe: (paths, result) =>
-        `${paths} paths, all predicted · ${result.unobserved} predicted but not returned for this record`,
+        `${paths} paths, all predicted · ${result.unreachable} under a null or empty parent · ` +
+        `${result.optionalAbsent} optional and not sent`,
     }),
     against({
       kind: 'bulk',
@@ -2244,133 +2310,16 @@ function contractChecks() {
       kind: 'bulk',
       name: 'bulk response fields',
       diff: coverageDiff,
-      fail: () => 'the live bulk response has fields this package does not predict',
+      fail: () => 'the live bulk response and this package disagree on which fields exist',
       describe: (paths, result) =>
-        `${paths} paths, all predicted · ${result.unobserved} predicted but not returned for this batch`,
+        `${paths} paths, all predicted · ${result.unreachable} under a null or empty parent · ` +
+        `${result.optionalAbsent} optional and not sent`,
     }),
+    againstBaseline('single'),
+    againstBaseline('bulk'),
   ];
-
-  /**
-   * Shape drift against this account's own last run.
-   *
-   * The contract checks above are the authority on whether the API still matches
-   * what the package promises. This one answers a narrower question they cannot:
-   * whether a value's *form* moved on a field the contract leaves as `string` —
-   * a code that gained a digit, a free-text field that started arriving empty.
-   * The package promises nothing there, so nothing is broken and nothing fails;
-   * it is worth seeing, and that is all.
-   *
-   * The recording is per-key and per-organization, so it is untracked. Comparing
-   * two accounts' recordings would report their different data as drift.
-   */
-  checks.push({
-    covers: ['contract'],
-    name: 'shape drift since last run',
-    cost: 0,
-    body(runner) {
-      const previous = loadBaseline();
-      const recorded = ['single', 'bulk'].filter(kind => observed[kind]?.signature);
-
-      if (recorded.length === 0) {
-        return { status: 'skip', detail: 'no response was returned to record' };
-      }
-
-      const drifted = [];
-      const compared = [];
-
-      for (const kind of recorded) {
-        const before = previous?.[kind];
-
-        // No recording for this endpoint, or one describing other organizations:
-        // either way there is nothing this run can be held against. Saying
-        // "unchanged" here would claim a comparison that never happened.
-        if (!before?.signature || subjectMismatch(before, observed[kind].subject)) {
-          continue;
-        }
-
-        compared.push(kind);
-
-        const schema = schemaDiff(before.signature, observed[kind].signature);
-        const types = typeDiff(before.signature, observed[kind].signature);
-        const changes = [...schema.changes, ...types.changes];
-
-        if (changes.length > 0) {
-          drifted.push({ kind, changes });
-          runner.note(
-            'shape drift since last run',
-            `${kind}: ${summarizeChanges(changes)} since ${before.recordedAt ?? 'the last recording'}\n${formatChanges(changes)}`,
-          );
-        }
-      }
-
-      writeFileSync(
-        baselinePath,
-        `${JSON.stringify(
-          {
-            note:
-              'Shape of the live API responses on the last run of this key: path, JSON type and ' +
-              'value format, no values. Untracked and per-key; the promise this is checked ' +
-              'against lives in src/response-contract.json.',
-            ...Object.fromEntries(
-              ['single', 'bulk'].map(kind => [
-                kind,
-                recorded.includes(kind)
-                  ? {
-                      recordedAt: new Date().toISOString(),
-                      baseUrl: runner.client.baseUrl,
-                      sdkVersion: VERSION,
-                      ...observed[kind].subject,
-                      signature: observed[kind].signature,
-                    }
-                  : (previous?.[kind] ?? null),
-              ]),
-            ),
-          },
-          null,
-          2,
-        )}\n`,
-      );
-
-      if (drifted.length > 0) {
-        return {
-          status: 'warn',
-          detail: `${drifted.map(one => one.kind).join(' and ')} moved since the last run of this key`,
-          data: { drifted: drifted.map(one => one.kind), compared },
-        };
-      }
-
-      return {
-        detail:
-          compared.length > 0
-            ? `${compared.join(' and ')} unchanged since the last run of this key`
-            : `${recorded.join(' and ')} recorded for these subjects — the next run compares`,
-        data: { drifted: [], compared },
-      };
-    },
-  });
-
-  return checks;
 }
 
-/**
- * A recording made against a different organization, or a different batch,
- * describes a different record. Comparing the two would report data variation as
- * drift, so the drift check stands down instead.
- */
-function subjectMismatch(recorded, subject) {
-  if (subject.ein && recorded.ein && recorded.ein !== subject.ein) {
-    return `the recording was made for EIN ${recorded.ein}, this run used ${subject.ein}`;
-  }
-
-  if (subject.eins && recorded.eins && recorded.eins.join(',') !== subject.eins.join(',')) {
-    return (
-      `the recording was made for EINs ${recorded.eins.join(', ')}, ` +
-      `this run used ${subject.eins.join(', ')}`
-    );
-  }
-
-  return null;
-}
 
 // --- checks: rechecking the same record (ex-28..ex-30) ----------------------
 
@@ -2752,18 +2701,25 @@ function printReport(groups, findings) {
     say(`\n${group.id}  ${group.title}`);
 
     for (const result of group.primary) {
-      say(
-        `  ${STATUS[result.status]} ${column(result.name)}${result.detail}` +
-          (result.cost > 0 ? `  [${result.cost} check(s)]` : ''),
-      );
+      // Padded before it is coloured: the escape sequences carry no width, and
+      // padding a string that contains them pushes the column out by their
+      // length on every line that has any.
+      const line =
+        `${column(result.name)}${result.detail}` +
+        (result.cost > 0 ? `  [${result.cost} check(s)]` : '');
+
+      say(`  ${mark(result.status)} ${tint(result.status, line)}`);
 
       for (const message of observations.get(result.name) ?? []) {
-        say(`      · ${message}`);
+        say(paint('dim', `      · ${message}`));
       }
     }
 
     for (const { entry, under } of group.secondary) {
-      say(`  ↳ ${STATUS[entry.status]} ${column(entry.name, NAME_WIDTH - 2)}checked under ${under}`);
+      say(
+        `  ↳ ${mark(entry.status)} ` +
+          tint(entry.status, `${column(entry.name, NAME_WIDTH - 2)}checked under ${under}`),
+      );
     }
 
     if (group.primary.length === 0 && group.secondary.length === 0) {
@@ -2858,8 +2814,10 @@ function finish(exitCode) {
 
   say('\nSummary');
   say(
-    `  ${counts.total} checks: ${counts.pass} passed, ${counts.fail} failed, ` +
-      `${counts.warn} warned, ${counts.skip} skipped`,
+    `  ${counts.total} checks: ${paint('green', `${counts.pass} passed`)}, ` +
+      `${paint(counts.fail > 0 ? 'red' : null, `${counts.fail} failed`)}, ` +
+      `${paint(counts.warn > 0 ? 'yellow' : null, `${counts.warn} warned`)}, ` +
+      `${counts.skip} skipped`,
   );
   say(
     `  ${files.length} example files: ${own} checked here, ${borrowed} checked under another, ` +
@@ -2885,7 +2843,7 @@ process.stdout.write('Running       ');
 for (const check of plan) {
   await runner.run(check);
 
-  process.stdout.write(STATUS[runner.results.at(-1).status]);
+  process.stdout.write(mark(runner.results.at(-1).status));
 }
 
 finish(runner.results.some(result => result.status === 'fail') ? 1 : 0);

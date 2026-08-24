@@ -1,5 +1,5 @@
 {
-  "note": "What this package predicts each response looks like: path, JSON type and value format, never a value. Derived from src/types.ts and hand-maintained alongside it; test/response-contract.test.ts holds the two in sync. scripts/smoke-live.mjs checks a live deployment against this. A diff here is a deliberate change to what the SDK promises.",
+  "note": "What this package predicts each response looks like: path, JSON type and value format, never a value. Derived from types.py and hand-maintained alongside it; tests/test_response_contract.py holds the two in sync. scripts/smoke_live.py checks a live deployment against this. A diff here is a deliberate change to what the SDK promises.",
   "required": {
     "envelope": [],
     "errorDetail": [],

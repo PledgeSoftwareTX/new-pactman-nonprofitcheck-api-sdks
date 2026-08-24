@@ -215,6 +215,99 @@ export function typeDiff(baseline, current) {
   return { changes: sortChanges(changes), total: changes.length };
 }
 
+/**
+ * The recording held against a live response, with the differences a recording
+ * cannot speak to left out.
+ *
+ * A baseline is one organization's response on one afternoon, so much of what
+ * separates it from today's run is not the API moving — it is a different
+ * subject, or the same subject whose Pub 78 row lapsed since. Two kinds of
+ * difference fall out of that, and neither is drift.
+ *
+ * Nullability. `pub78_city` was `text` when the recording was made and is
+ * `null` now. The field is still there and still declared `string | null`; this
+ * organization simply has no Pub 78 city. Only a move between two forms a value
+ * actually took — `digits:9` to `text` — says the API changed.
+ *
+ * Reachability. `organization_types` arrived null, so the four paths beneath it
+ * had nowhere to be and read as removed. {@link coverageDiff} already excuses
+ * that against the contract; a recording needs it in both directions, because
+ * which side has the populated parent is an accident of which ran first.
+ *
+ * Both are counted rather than dropped, so a green run still says how much it
+ * passed over. What the recording cannot answer, the contract checks do: a
+ * field that must not be null is declared that way in `response-contract.json`,
+ * and {@link contractDiff} fails on it there.
+ */
+export function baselineDiff(before, current) {
+  const changes = [];
+  let nullable = 0;
+  let unreachable = 0;
+
+  for (const [path, token] of Object.entries(before)) {
+    if (Object.hasOwn(current, path)) {
+      if (current[path] === token) {
+        continue;
+      }
+
+      if (nullabilityOnly(token, current[path])) {
+        nullable += 1;
+        continue;
+      }
+
+      changes.push({ kind: 'changed', path, from: token, to: current[path] });
+      continue;
+    }
+
+    if (unreachableIn(path, current)) {
+      unreachable += 1;
+      continue;
+    }
+
+    changes.push({ kind: 'removed', path, token });
+  }
+
+  for (const [path, token] of Object.entries(current)) {
+    if (Object.hasOwn(before, path)) {
+      continue;
+    }
+
+    if (unreachableIn(path, before)) {
+      unreachable += 1;
+      continue;
+    }
+
+    changes.push({ kind: 'added', path, token });
+  }
+
+  return { changes: sortChanges(changes), total: changes.length, nullable, unreachable };
+}
+
+/**
+ * Whether two tokens differ only over whether a value arrived.
+ *
+ * Drop `null` from both sides and compare what is left. `date` against
+ * `date|null` leaves the same form on each. `date` against `null` leaves one
+ * side with nothing, and a side that recorded no form makes no claim about the
+ * form — so there is nothing there to have moved. `digits:9` against `text`
+ * leaves two different forms, which is drift and stays reported.
+ */
+function nullabilityOnly(before, after) {
+  const left = withoutNull(before);
+  const right = withoutNull(after);
+
+  return (
+    left.length === 0 ||
+    right.length === 0 ||
+    (left.length === right.length && left.every((token, index) => token === right[index]))
+  );
+}
+
+/** A token's forms, in the order signatures store them, with `null` dropped. */
+function withoutNull(token) {
+  return token.split('|').filter(one => one !== 'null');
+}
+
 /** Removals first: a field that disappeared breaks callers that read it. */
 const CHANGE_ORDER = { removed: 0, changed: 1, added: 2 };
 
@@ -242,21 +335,22 @@ export function summarizeChanges(changes) {
 
 const MARKS = { removed: '-', changed: '~', added: '+' };
 
-/** One line per change, indented to sit under a check's own line. */
-export function formatChanges(changes, { indent = '      ', limit = 12 } = {}) {
-  const lines = changes.map(change =>
-    change.kind === 'changed'
-      ? `~ ${change.path}: ${change.from} → ${change.to}`
-      : `${MARKS[change.kind]} ${change.path} (${change.token})`,
-  );
-
-  const shown = lines.slice(0, limit);
-
-  if (lines.length > shown.length) {
-    shown.push(`… and ${lines.length - shown.length} more`);
-  }
-
-  return shown.map(line => `${indent}${line}`).join('\n');
+/**
+ * One line per change, indented to sit under a check's own line.
+ *
+ * Every change, with nothing elided. A run that says a field moved and then
+ * hides which one sends you back to the deployment to find out by hand, and the
+ * list is only long when something large moved — which is exactly when the whole
+ * of it is what you need.
+ */
+export function formatChanges(changes, { indent = '      ' } = {}) {
+  return changes
+    .map(change =>
+      change.kind === 'changed'
+        ? `${indent}~ ${change.path}: ${change.from} → ${change.to}`
+        : `${indent}${MARKS[change.kind]} ${change.path} (${change.token})`,
+    )
+    .join('\n');
 }
 
 // --- the package's own prediction -------------------------------------------
@@ -333,7 +427,11 @@ export function composeExpected(contract, kind) {
     expected[`${prefix}${field}`] = token;
   }
 
-  expected[`${prefix}organization_types[]`] = 'object';
+  // Nullable elements, not just a nullable array: the API sends a null in the
+  // list where Publication 78 has a deductibility row it cannot resolve, so a
+  // caller reading `types[0].organization_type` has to check. `types.ts`
+  // declares the same thing.
+  expected[`${prefix}organization_types[]`] = 'null|object';
 
   for (const [field, token] of Object.entries(contract.organizationType)) {
     expected[`${prefix}organization_types[].${field}`] = token;
@@ -371,19 +469,28 @@ export function contractDiff(expected, observed) {
 }
 
 /**
- * Fields the API sent that the package does not predict.
+ * Fields the API sent that the package does not predict, and fields it predicts
+ * that the API did not send.
  *
- * The index signature on `Nonprofit` means these are readable by a caller who
- * knows to look, and invisible to one who does not — which is the state this
- * check exists to end. An unpredicted field is a prediction gone stale, not a
- * broken response, so it is reported on its own.
+ * Both directions fail. An unpredicted field is readable only by a caller who
+ * already knows to look — the index signature on `Nonprofit` hides it from
+ * everyone else — and a predicted field that stopped arriving breaks every
+ * caller that reads it. The declared types notice neither, so this is the only
+ * place either one is caught.
  *
- * The reverse — a path the contract predicts and the response omitted — is not
- * a change. Every declared field is optional, and a record simply having no OFAC
- * finding is not the API moving. Only the count of those is surfaced.
+ * The exception is a path that had nowhere to arrive: `errors[].reason` while
+ * `errors` is null, `data.organization_types[].organization_type` while that
+ * array is null or empty. The parent already accounts for the child's absence,
+ * and every successful response has a null `errors` — reporting those would
+ * fail every green run and say nothing. They are counted as unreachable.
+ *
+ * A container that vanished is reported once, at its shallowest path: a `data`
+ * that stopped arriving is one failure, not fifty-nine.
  */
-export function coverageDiff(expected, observed) {
+export function coverageDiff(expected, observed, required = null) {
   const changes = [];
+  let unreachable = 0;
+  let optionalAbsent = 0;
 
   for (const [path, token] of Object.entries(observed)) {
     if (!Object.hasOwn(expected, path)) {
@@ -391,9 +498,121 @@ export function coverageDiff(expected, observed) {
     }
   }
 
-  return {
-    changes: sortChanges(changes),
-    total: changes.length,
-    unobserved: Object.keys(expected).filter(path => !Object.hasOwn(observed, path)).length,
-  };
+  const absent = Object.keys(expected).filter(path => !Object.hasOwn(observed, path));
+  const missing = new Set(absent);
+
+  for (const path of absent) {
+    if (unreachableIn(path, observed)) {
+      unreachable += 1;
+      continue;
+    }
+
+    if (ancestorsOf(path).some(ancestor => missing.has(ancestor))) {
+      continue;
+    }
+
+    // A field the types declare optional is permitted to be absent — that is
+    // what `?:` means. Reporting it would fail a response the package's own
+    // declared types accept. `required` carries the policy; without one every
+    // predicted path is treated as required, which is what the differ did
+    // before a caller could say otherwise.
+    if (required && !required.has(path)) {
+      optionalAbsent += 1;
+      continue;
+    }
+
+    changes.push({ kind: 'removed', path, token: expected[path] });
+  }
+
+  return { changes: sortChanges(changes), total: changes.length, unreachable, optionalAbsent };
+}
+
+/**
+ * The paths a response must carry: the structural ones every envelope has, and
+ * whatever `src/types.ts` declares without a `?`.
+ *
+ * Optionality is the promise the package actually makes. A field declared
+ * `bmf_city?: string | null` says "this may not be here", so a response without
+ * it keeps the promise, and failing on its absence tests the deployment's
+ * current data rather than the package's contract.
+ */
+export function requiredPathsOf(contract, kind) {
+  const single = kind === 'single';
+  const prefix = single ? 'data.' : 'data[].';
+  const required = contract.required ?? {};
+
+  // Composed by `composeExpected` rather than declared on an interface: the
+  // shape of the envelope itself, which is not optional in any response.
+  const paths = new Set(['data', 'errors[]', 'errors[].eins[]', `${prefix}organization_types[]`]);
+
+  if (!single) {
+    paths.add('data[]');
+  }
+
+  for (const field of required.envelope ?? []) {
+    paths.add(field);
+  }
+
+  for (const field of required.errorDetail ?? []) {
+    paths.add(`errors[].${field}`);
+  }
+
+  for (const field of required.nonprofit ?? []) {
+    paths.add(`${prefix}${field}`);
+  }
+
+  for (const field of required.organizationType ?? []) {
+    paths.add(`${prefix}organization_types[].${field}`);
+  }
+
+  return paths;
+}
+
+/**
+ * Every enclosing path of a signature path, innermost first.
+ *
+ *   data.organization_types[].organization_type
+ *     → data.organization_types[], data.organization_types, data
+ */
+function ancestorsOf(path) {
+  const ancestors = [];
+
+  for (let rest = path; ; ) {
+    if (rest.endsWith('[]')) {
+      rest = rest.slice(0, -2);
+    } else {
+      const dot = rest.lastIndexOf('.');
+
+      if (dot === -1) {
+        return ancestors;
+      }
+
+      rest = rest.slice(0, dot);
+    }
+
+    ancestors.push(rest);
+  }
+}
+
+/**
+ * Whether a container above this path arrived in a form with no room for it.
+ *
+ * A null has no members and an empty array has no elements, so nothing under
+ * either was ever going to appear.
+ */
+function unreachableIn(path, observed) {
+  return ancestorsOf(path).some(ancestor => {
+    const token = observed[ancestor];
+
+    if (token === undefined) {
+      return false;
+    }
+
+    const tokens = token.split('|');
+
+    return (
+      tokens.every(one => one === 'null') ||
+      (tokens.includes('array') && !Object.hasOwn(observed, `${ancestor}[]`))
+    );
+  });
 }

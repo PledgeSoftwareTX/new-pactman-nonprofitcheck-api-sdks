@@ -65,7 +65,7 @@ class Nonprofit(TypedDict, total=False):
     pub78_source_org_type_1: str | None
     pub78_source_org_type_2: str | None
     pub78_source_org_type_3: str | None
-    organization_types: list[OrganizationType] | None
+    organization_types: list[OrganizationType | None] | None
     most_recent_pub78: str | None
 
     # IRS Business Master File

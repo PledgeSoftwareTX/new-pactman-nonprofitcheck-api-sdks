@@ -50,11 +50,24 @@ from typing import Any, cast
 import httpx
 from contract import (
     Diff,
+    baseline_diff,
+    compose_expected,
+    contract_diff,
+    coverage_diff,
     format_changes,
-    schema_diff,
+    required_paths_of,
     signature_of,
     summarize_changes,
-    type_diff,
+)
+from env import (
+    API_KEY_ENV,
+    BULK_EINS,
+    BULK_PROBE_LIMIT,
+    EIN,
+    MISSING_EIN,
+    ROOT,
+    EnvFile,
+    load_env_file,
 )
 from fixtures import KNOWN_NONPROFIT_FIELDS
 
@@ -98,73 +111,61 @@ from pactman_nonprofit_check_plus import (
     supported_environments,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
-
-# The organizations this harness checks.
-#
-# A primary subject with a record, a second one to give the bulk order and
-# duplicate probes something to work with, and a well-formed EIN with no record
-# for the not-found and partial-success paths. They are the test data in the test
-# plan, and the first two are reachable on a free-tier key, so a free key gets as
-# far as a free key can.
-EIN = "996589560"
-BULK_EINS = ["996589560", "680343125"]
-MISSING_EIN = "999999999"
-
-# The variable the credential is read from, in the environment or in `.env`.
-API_KEY_ENV = "PACTMAN_API_KEY"
-
 # Sent where a key is meant to be rejected. Synthetic, so it cannot be valid.
 INVALID_API_KEY = "pactman-smoke-test-invalid-key"
 
 # Ceiling on the burst the rate-limit probe is allowed to send.
 RATE_LIMIT_ATTEMPTS = 10
 
+# --- colour ------------------------------------------------------------------
+
+# ANSI colour, when there is someone there to see it.
+#
+# This report is read by eye far more often than it is piped, and a failed check
+# that looks exactly like a passed one is a failed check that gets scrolled past.
+# Off when stdout is not a terminal, when NO_COLOR is set (no-color.org) or when
+# TERM says dumb — a redirected log stays plain text, with no escape sequences to
+# confuse whatever reads it next. FORCE_COLOR overrides all of that, for a CI log
+# that is rendered with colour even though nothing it is written to is a terminal.
+COLOR = (
+    False
+    if os.environ.get("NO_COLOR")
+    else bool(os.environ.get("FORCE_COLOR"))
+    or (sys.stdout.isatty() and os.environ.get("TERM") != "dumb")
+)
+
+_CODES = {"red": 31, "green": 32, "yellow": 33, "dim": 2}
+
+
+def paint(colour: str | None, text: str) -> str:
+    if not COLOR or colour is None:
+        return text
+
+    return f"\u001b[{_CODES[colour]}m{text}\u001b[0m"
+
+
 STATUS = {"pass": "✓", "fail": "✗", "warn": "!", "skip": "\u2013"}
 
+# How each status is coloured. A pass gets a green mark and plain text — a report
+# that is mostly passes should read as text, not as a wall of green — while a
+# failure is red for its whole line, mark and message together, because the
+# message is the part worth finding.
+STATUS_COLOR: dict[str, str | None] = {
+    "pass": None,
+    "fail": "red",
+    "warn": "yellow",
+    "skip": "dim",
+}
 
-# --- environment file --------------------------------------------------------
+
+def mark(status: str) -> str:
+    """The status mark, coloured."""
+    return paint("green" if status == "pass" else STATUS_COLOR[status], STATUS[status])
 
 
-@dataclass(frozen=True)
-class EnvFile:
-    """A loaded ``.env``, and which names it supplied."""
-
-    path: Path
-    names: set[str]
-
-
-def load_env_file() -> EnvFile | None:
-    """
-    Loads ``python/.env``, so the key and any standing overrides live in a file
-    rather than in the shell for every run. The file is gitignored.
-
-    A variable already in the environment wins: exporting one for a single run
-    must not be silently overridden by a file someone set up months ago.
-    """
-    path = ROOT / ".env"
-
-    if not path.exists():
-        return None
-
-    pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
-    names: set[str] = set()
-
-    for line in path.read_text(encoding="utf-8").splitlines():
-        matched = pattern.match(line)
-
-        if not matched or matched.group(1) in os.environ:
-            continue
-
-        name, raw = matched.group(1), matched.group(2).strip()
-
-        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
-            raw = raw[1:-1]
-
-        os.environ[name] = raw
-        names.add(name)
-
-    return EnvFile(path=path, names=names)
+def tint(status: str, text: str) -> str:
+    """A line of report text, in the colour its status calls for."""
+    return paint(STATUS_COLOR[status], text)
 
 
 # --- secret handling ---------------------------------------------------------
@@ -199,12 +200,13 @@ def key_source(env_file: EnvFile | None) -> str:
 
 EXAMPLES_DIR = ROOT / "examples"
 
-# The checks that are not answering for an example file. The response contract is
-# the API's own shape held against a recording of it — drift there is not
-# something any example claims, and it gets its own heading rather than being
-# filed under one.
+# The checks that are not answering for an example file. They hold the live shape
+# against ``response_contract.json``, what this package promises, and against
+# ``response_baseline.json``, what production returned when it was recorded.
+# Whether the API still matches either is not something any one example claims, so
+# they get their own heading rather than being filed under one.
 CONTRACT_GROUP_ID = "contract"
-CONTRACT_GROUP_TITLE = "the live response held against the recorded baseline"
+CONTRACT_GROUP_TITLE = "the live response against the contract and the recording"
 
 _TITLE = re.compile(r"^EX-\d{2}\s+—\s+(.+?)\.?\s*$", re.MULTILINE)
 _NUMBERED = re.compile(r"^ex_\d{2}_")
@@ -2043,7 +2045,7 @@ def forward_compatibility_checks() -> list[Check]:
 
 
 def bulk_checks(eins: Sequence[str]) -> list[Check]:
-    bulk_eins = list(eins[:3])
+    bulk_eins = list(eins[:BULK_PROBE_LIMIT])
     duplicate_probe = [eins[1], eins[0], eins[1]] if len(eins) >= 2 else None
 
     def bulk_partial_success(runner: Runner) -> Outcome:
@@ -2287,64 +2289,89 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
     return checks
 
 
-# --- checks: the raw response contract ---------------------------------------
+# --- checks: the response against what this package predicts -------------------
 
 
 def contract_checks() -> list[Check]:
     """
-    Four checks that hold the raw JSON this run received against a recorded
-    baseline: the schema and the types of the single-check response, and the same
-    two for bulk.
+    Six checks that hold the raw JSON this run received against the two documents
+    that describe what it is supposed to look like.
 
     Everything else in this file asserts what the SDK does with a response. These
-    assert that the response itself has not moved — a field the API stopped
-    sending, one it started sending, one that changed from a boolean to a string
-    or from ``M/D/YYYY h:mm:ss AM`` to ISO. None of it is knowable from the SDK's
-    own types, which are permissive by design so a server-side change cannot break
-    deserialization; this is where such a change is meant to become visible.
+    assert that the response is the one the SDK was written for: a field that
+    changed from a bool to a string, a timestamp that turned ISO, a field the API
+    started sending that the package has never heard of, a field it stopped
+    sending. None of it is knowable from the SDK's own types at runtime — a
+    ``total=False`` TypedDict is a plain dict once it is running, permissive by
+    design so a server-side change cannot break deserialization — so this is where
+    such a change is meant to become visible.
+
+    The two documents answer different questions and both fail the run.
+
+    ``response_contract.json`` is what this package *promises*, derived from
+    ``types.py``. A failure there means the API no longer matches what the SDK
+    tells its users to expect. It is checked in and identical for everyone, which
+    is what lets these checks fail on the very first run rather than needing a
+    recording to compare against.
+
+    ``response_baseline.json`` is what production *returned*, recorded once by
+    ``python scripts/record_baseline.py`` and committed. A failure there means
+    production moved — in any direction, including in the fields the contract
+    deliberately leaves as a bare ``string``, where the promise is too loose to
+    notice anything. The recording is never written by a run: a baseline that
+    rewrites itself agrees with the API by construction and can never fail.
 
     Free. Both responses were already fetched and paid for by the checks above.
-
-    The first run against a deployment has nothing to compare to, so it records
-    what it saw and says so; every run after that is a comparison. A fifth entry
-    writes the file when there is something new to write, and stands down when
-    there is not. Deleting the file is how a recording is redone, and deleting it
-    is deliberate work — re-recording discards the evidence a comparison gives.
-
-    The baseline holds shapes only — path, type and value format, never a value —
-    so it is safe to commit and a failure is safe to print. See ``contract.py``.
     """
-    baseline_path = Path(__file__).resolve().parent / "contract-baseline.json"
-    state: dict[str, Any] = {"baseline": None, "loaded": False}
+    package = ROOT / "src" / "pactman_nonprofit_check_plus"
+    contract_path = package / "response_contract.json"
+    baseline_path = package / "response_baseline.json"
+
+    loaded: dict[str, Any] = {}
     observed: dict[str, dict[str, Any]] = {}
-    pending: set[str] = set()
-    announced_target = [False]
+
+    def load_contract() -> dict[str, Any]:
+        """Read once, on the first check that needs it."""
+        if "contract" not in loaded:
+            try:
+                loaded["contract"] = json.loads(contract_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise CheckFailedError(
+                    f"{contract_path.name} is not readable JSON: {error}"
+                ) from error
+
+        return cast("dict[str, Any]", loaded["contract"])
 
     def load_baseline() -> dict[str, Any]:
-        if not state["loaded"]:
-            state["loaded"] = True
-            state["baseline"] = (
-                json.loads(baseline_path.read_text(encoding="utf-8"))
-                if baseline_path.exists()
-                else None
-            )
+        """
+        The committed recording. An unreadable or absent one is a failure, not a
+        shrug: the whole point of the file is that every run is held against it,
+        and a run that silently passes for want of one is the state this replaced.
+        """
+        if "baseline" not in loaded:
+            if not baseline_path.exists():
+                raise CheckFailedError(
+                    f"{baseline_path.name} is missing — record it against production with "
+                    "`python scripts/record_baseline.py` and commit it"
+                )
 
-        return cast("dict[str, Any]", state["baseline"] or {})
+            try:
+                loaded["baseline"] = json.loads(baseline_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise CheckFailedError(
+                    f"{baseline_path.name} is not readable JSON: {error}"
+                ) from error
+
+        return cast("dict[str, Any]", loaded["baseline"])
 
     def observe(runner: Runner, kind: str) -> dict[str, Any]:
-        """Signatures this run observed, by endpoint. Built once, read by both checks."""
+        """Signatures this run observed, by endpoint. Built once, read by every check."""
         if kind not in observed:
             if kind == "single":
                 raw = runner.single_result.raw if runner.single_result else None
-                subject: dict[str, Any] = {
-                    "ein": record_of(
-                        runner.single_result.nonprofit if runner.single_result else None
-                    ).get("ein")
-                }
                 absent = "the single check did not return a response"
             else:
                 raw = runner.bulk_result.raw if runner.bulk_result else None
-                subject = {"eins": [normalize_ein(value) for value in runner.bulk_submitted]}
                 absent = (
                     "this key restricts bulk EINs to an allowlist, so no bulk response "
                     "was returned"
@@ -2355,52 +2382,26 @@ def contract_checks() -> list[Check]:
             observed[kind] = (
                 {"missing": absent}
                 if raw is None
-                else {"subject": subject, "signature": signature_of(raw)}
+                else {"signature": signature_of(raw)}
             )
 
         return observed[kind]
 
-    def subject_mismatch(recorded: dict[str, Any], subject: dict[str, Any]) -> str | None:
-        """
-        A baseline recorded against a different organization, or a different batch,
-        describes a different record. Comparing the two would report data variation
-        as API drift, so the checks stand down instead.
-        """
-        if subject.get("ein") and recorded.get("ein") and recorded["ein"] != subject["ein"]:
-            return (
-                f"the baseline was recorded for EIN {recorded['ein']}, this run used "
-                f"{subject['ein']}"
-            )
-
-        if subject.get("eins") and recorded.get("eins") and recorded["eins"] != subject["eins"]:
-            return (
-                f"the baseline was recorded for EINs {', '.join(recorded['eins'])}, "
-                f"this run used {', '.join(subject['eins'])}"
-            )
-
-        return None
-
-    def baseline_age(recorded: dict[str, Any], stored: dict[str, Any]) -> str:
-        moment = parse_api_date(recorded.get("recorded_at") or stored.get("recorded_at"))
-
-        if moment is None:
-            return "baseline of unknown age"
-
-        return f"baseline {age_in_days(moment)}d old"
-
     def against(
         kind: str,
         name: str,
-        diff: Callable[[dict[str, str], dict[str, str]], Diff],
-        describe: str,
+        diff: Callable[[dict[str, str], dict[str, str], set[str] | None], Diff],
+        fail: str,
+        describe: Callable[[int, Diff], str],
     ) -> Check:
         """
-        Both checks on an endpoint do the same work along different axes: signature
-        of what arrived, held against the recorded one by ``diff``.
+        Both checks on an endpoint do the same work along different axes: the
+        signature of what arrived, held against the contract by ``diff``.
 
-        With nothing recorded for this endpoint yet, there is nothing to hold it
-        against, so this run becomes the baseline. That is the whole first-run
-        ceremony: run it, and from the next run on the comparison is live.
+        There is no first-run ceremony. The contract is already on disk before the
+        first request goes out, so the first run is a real comparison — which is
+        the whole difference between checking against a prediction and checking
+        against a recording of the thing being predicted.
         """
 
         def body(runner: Runner) -> Outcome:
@@ -2409,135 +2410,128 @@ def contract_checks() -> list[Check]:
             if "missing" in current:
                 return Outcome(status="skip", detail=str(current["missing"]))
 
+            expected = compose_expected(load_contract(), kind)
+            result = diff(
+                expected, current["signature"], required_paths_of(load_contract(), kind)
+            )
             paths = len(current["signature"])
-            stored = load_baseline()
-            recorded = stored.get(kind) if isinstance(stored.get(kind), dict) else None
-
-            if not recorded or not recorded.get("signature"):
-                pending.add(kind)
-
-                return Outcome(
-                    detail=f"{paths} paths recorded — the next run checks against them",
-                    data={"paths": paths},
-                )
-
-            mismatch = subject_mismatch(recorded, current["subject"])
-
-            if mismatch:
-                return Outcome(
-                    status="skip", detail=f"{mismatch} — the two describe different records"
-                )
-
-            recorded_base_url = recorded.get("base_url") or stored.get("base_url")
-
-            if (
-                not announced_target[0]
-                and recorded_base_url
-                and recorded_base_url != runner.client.base_url
-            ):
-                announced_target[0] = True
-                runner.note(
-                    name,
-                    f"the baseline was recorded against {recorded_base_url}; this run "
-                    f"targeted {runner.client.base_url}, so a difference may be between "
-                    "deployments rather than over time",
-                )
-
-            result = diff(recorded["signature"], current["signature"])
 
             check_that(
                 result.total == 0,
-                f"the live {kind} response no longer matches {baseline_path.name} — "
-                f"{summarize_changes(result.changes)}\n{format_changes(result.changes)}\n"
-                f"      delete {baseline_path.name} and re-run to re-record, "
+                f"{fail} — {summarize_changes(result.changes)}\n"
+                f"{format_changes(result.changes)}\n"
+                f"      reconcile types.py and {contract_path.name} with the API, "
                 "once the change is understood and intended",
             )
 
             return Outcome(
-                detail=f"{paths} {describe} · {baseline_age(recorded, stored)}",
-                data={"paths": paths},
+                detail=describe(paths, result),
+                data={"paths": paths, "predicted": len(expected)},
             )
 
         return Check((CONTRACT_GROUP_ID,), name, 0, body)
 
-    def write_baseline(runner: Runner) -> Outcome:
-        previous = load_baseline()
-        written = [
-            kind
-            for kind in ("single", "bulk")
-            if kind in pending and "signature" in observed[kind]
-        ]
+    def against_baseline(kind: str) -> Check:
+        """
+        The same response, held against the committed recording of production.
 
-        if not written:
+        Strict in both directions on the shape: a path that appeared, a path that
+        disappeared, a value whose form moved. What it does not fail on is the
+        part a recording has no standing to judge — whether a nullable field
+        happened to carry a value, and the paths under a parent that arrived
+        null. A baseline is one organization on one afternoon, and those differ
+        between two green runs against the same unchanged deployment.
+        :func:`baseline_diff` sets that line; the counts it passed over are
+        printed either way, so nothing is hidden.
+        """
+        name = f"{kind} response vs recording"
+
+        def body(runner: Runner) -> Outcome:
+            current = observe(runner, kind)
+
+            if "missing" in current:
+                return Outcome(status="skip", detail=str(current["missing"]))
+
+            recording = load_baseline()
+            before = recording.get(kind)
+
+            check_that(
+                isinstance(before, dict) and bool(before.get("signature")),
+                f"no {kind} shape is recorded in {baseline_path.name} — record it against "
+                "production with `python scripts/record_baseline.py` and commit it",
+            )
+
+            recorded = cast("dict[str, Any]", before)
+
+            result = baseline_diff(recorded["signature"], current["signature"])
+
+            check_that(
+                result.total == 0,
+                f"the live {kind} response no longer matches the recording made from "
+                f"{recording.get('base_url') or 'production'} on "
+                f"{recording.get('recorded_at') or 'an earlier date'} — "
+                f"{summarize_changes(result.changes)}\n{format_changes(result.changes)}\n"
+                "      if production moved and the move is intended, re-record with "
+                "`python scripts/record_baseline.py` and commit the diff",
+            )
+
+            paths = len(current["signature"])
+
             return Outcome(
-                status="skip",
-                detail=f"{baseline_path.name} already covers what this run observed",
-            )
-
-        # Only what this run recorded is rewritten. An endpoint that was checked, or
-        # that this run never reached, keeps the shape already on file — a failed
-        # comparison must not quietly become the new baseline.
-        def record_for(kind: str) -> Any:
-            if kind not in written:
-                return previous.get(kind)
-
-            return {
-                "recorded_at": datetime.now().isoformat(timespec="seconds"),
-                "base_url": runner.client.base_url,
-                "sdk_version": VERSION,
-                **observed[kind]["subject"],
-                "signature": observed[kind]["signature"],
-            }
-
-        kept = [
-            kind
-            for kind in ("single", "bulk")
-            if kind not in written and isinstance(previous.get(kind), dict)
-        ]
-
-        baseline_path.write_text(
-            json.dumps(
-                {
-                    "note": (
-                        "Shape of the live API responses: path, JSON type and value format, "
-                        "no values. Recorded on first run; delete this file and re-run to "
-                        "re-record."
-                    ),
-                    "single": record_for("single"),
-                    "bulk": record_for("bulk"),
+                detail=(
+                    f"{paths} paths, matching the recording · {result.nullable} differ only "
+                    f"in whether a value arrived · {result.unreachable} under a null or "
+                    "empty parent"
+                ),
+                data={
+                    "paths": paths,
+                    "nullable": result.nullable,
+                    "unreachable": result.unreachable,
                 },
-                indent=2,
             )
-            + "\n",
-            encoding="utf-8",
+
+        return Check((CONTRACT_GROUP_ID,), name, 0, body)
+
+    def predicted(paths: int, result: Diff) -> str:
+        return (
+            f"{paths} paths, all predicted · {result.unreachable} predicted under a null "
+            "or empty parent"
         )
 
-        return Outcome(
-            detail=(
-                f"{' and '.join(written)} written to {baseline_path.name} — commit it"
-                + (f" · {' and '.join(kept)} left as recorded" if kept else "")
-            ),
-            data={"written": written, "kept": kept},
-        )
+    def permitted(paths: int, result: Diff) -> str:
+        return f"{paths} paths carry the predicted types and value formats"
 
     return [
         against(
-            "single", "single response schema", schema_diff, "paths, none added or removed"
+            "single",
+            "single response types",
+            contract_diff,
+            "the live single response carries values this package does not predict",
+            permitted,
         ),
         against(
             "single",
-            "single response types",
-            type_diff,
-            "paths carry the recorded types and value formats",
+            "single response fields",
+            coverage_diff,
+            "the live single response and this package disagree on which fields exist",
+            predicted,
         ),
-        against("bulk", "bulk response schema", schema_diff, "paths, none added or removed"),
         against(
             "bulk",
             "bulk response types",
-            type_diff,
-            "paths carry the recorded types and value formats",
+            contract_diff,
+            "the live bulk response carries values this package does not predict",
+            permitted,
         ),
-        Check((CONTRACT_GROUP_ID,), "baseline", 0, write_baseline),
+        against(
+            "bulk",
+            "bulk response fields",
+            coverage_diff,
+            "the live bulk response and this package disagree on which fields exist",
+            predicted,
+        ),
+        against_baseline("single"),
+        against_baseline("bulk"),
     ]
 
 
@@ -2963,19 +2957,27 @@ def print_report(groups: Sequence[Group], findings: Sequence[Finding]) -> None:
 
         for result in group.primary:
             cost = f"  [{result.cost} check(s)]" if result.cost else ""
-            say(f"  {STATUS[result.status]} {column(result.name)}{result.detail}{cost}")
+            # Padded before it is coloured: the escape sequences carry no width,
+            # and padding a string that contains them pushes the column out by
+            # their length on every line that has any.
+            line = f"{column(result.name)}{result.detail}{cost}"
+
+            say(f"  {mark(result.status)} {tint(result.status, line)}")
 
             for message in observations.get(result.name, []):
-                say(f"      · {message}")
+                say(paint("dim", f"      · {message}"))
 
         for result, under in group.secondary:
             say(
-                f"  ↳ {STATUS[result.status]} "
-                f"{column(result.name, NAME_WIDTH - 2)}checked under {under}"
+                f"  ↳ {mark(result.status)} "
+                + tint(
+                    result.status,
+                    f"{column(result.name, NAME_WIDTH - 2)}checked under {under}",
+                )
             )
 
         if not group.primary and not group.secondary:
-            say(f"  {STATUS['skip']} no check of its own — it composes examples checked above")
+            say(f"  {mark('skip')} no check of its own — it composes examples checked above")
 
 
 def print_summary(
@@ -2997,9 +2999,13 @@ def print_summary(
     print_report(groups, runner.findings)
 
     say("\nSummary")
+    passed = paint("green", f"{counts['pass']} passed")
+    failed = paint("red" if counts["fail"] else None, f"{counts['fail']} failed")
+    warned = paint("yellow" if counts["warn"] else None, f"{counts['warn']} warned")
+
     say(
-        f"  {len(runner.results)} checks: {counts['pass']} passed, {counts['fail']} failed, "
-        f"{counts['warn']} warned, {counts['skip']} skipped"
+        f"  {len(runner.results)} checks: {passed}, {failed}, {warned}, "
+        f"{counts['skip']} skipped"
     )
     say(
         f"  {len(files)} example files: {own} checked here, {borrowed} checked under another, "
@@ -3071,7 +3077,7 @@ def main() -> int:
         try:
             for check in plan:
                 runner.run(check)
-                print(STATUS[runner.results[-1].status], end="", flush=True)
+                print(mark(runner.results[-1].status), end="", flush=True)
         except KeyboardInterrupt:
             # A run stopped halfway still paid for what it sent, so it still reports.
             interrupted = True

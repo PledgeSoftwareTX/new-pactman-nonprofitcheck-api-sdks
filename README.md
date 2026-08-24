@@ -4,10 +4,17 @@ Official client libraries for the **Pactman Nonprofit Check Plus API**: look up 
 
 One directory per language, each published independently.
 
-| Language             | Package                            | Status    | Docs                                   |
-| -------------------- | ---------------------------------- | --------- | -------------------------------------- |
-| Node.js / TypeScript | `@pactmandev/nonprofit-check-plus` | Available | [nodejs/README.md](./nodejs/README.md) |
-| Python               | `pactman-nonprofit-check-plus`     | Available | [python/README.md](./python/README.md) |
+| Language             | Package                             | Status    | Docs                                   |
+| -------------------- | ----------------------------------- | --------- | -------------------------------------- |
+| Node.js / TypeScript | `@pactmandev/nonprofit-check-plus`  | Available | [nodejs/README.md](./nodejs/README.md) |
+| Python               | `pactman-nonprofit-check-plus`      | Available | [python/README.md](./python/README.md) |
+| PHP                  | `pactmandev/nonprofit-check-plus`   | Available | [separate repository][php-sdk]          |
+
+[php-sdk]: https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-php-sdk
+
+The PHP SDK lives in its own repository. Packagist builds a release from the git
+tag and reads `composer.json` from the repository root, so it cannot be published
+from a subdirectory of this one.
 
 ## API surface
 

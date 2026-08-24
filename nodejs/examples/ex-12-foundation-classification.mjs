@@ -58,8 +58,8 @@ await withFixtureApi(async client => {
       console.log('    none returned');
     } else {
       for (const [index, entry] of types.entries()) {
-        console.log(`    [${index}] status=${entry.deductibility_status_description}` +
-          ` limitation=${entry.deductibility_limitation}`);
+        console.log(`    [${index}] status=${entry?.deductibility_status_description}` +
+          ` limitation=${entry?.deductibility_limitation}`);
       }
     }
 

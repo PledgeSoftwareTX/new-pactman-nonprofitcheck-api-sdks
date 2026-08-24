@@ -741,7 +741,11 @@ pub78.get("church_message")
 pub78.get("most_recent")
 pub78.get("source_org_type_1")  # …_2, …_3
 
+# An entry can itself be null, so guard before reading it.
 for entry in pub78.get("organization_types") or []:
+    if entry is None:
+        continue
+
     entry.get("deductibility_status_description")
     entry.get("deductibility_limitation")
     entry.get("organization_type")
@@ -753,7 +757,7 @@ ACCEPTED_LIMITATIONS = ["50%", "60%"]
 limitations = [
     entry["deductibility_limitation"]
     for entry in pub78.get("organization_types") or []
-    if entry.get("deductibility_limitation") is not None
+    if entry and entry.get("deductibility_limitation") is not None
 ]
 
 eligible_under_this_policy = pub78.get("verified") is True and any(

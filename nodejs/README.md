@@ -662,10 +662,11 @@ pub78?.church_message;
 pub78?.most_recent;
 pub78?.source_org_type_1; // …_2, …_3
 
+// An entry can itself be null, so read through it rather than into it.
 for (const entry of pub78?.organization_types ?? []) {
-  entry.deductibility_status_description;
-  entry.deductibility_limitation;
-  entry.organization_type;
+  entry?.deductibility_status_description;
+  entry?.deductibility_limitation;
+  entry?.organization_type;
 }
 
 // Your policy, expressed against the source data. Change the predicate, not the
@@ -673,7 +674,7 @@ for (const entry of pub78?.organization_types ?? []) {
 const ACCEPTED_LIMITATIONS = ['50%', '60%'];
 
 const limitations = (pub78?.organization_types ?? [])
-  .map(entry => entry.deductibility_limitation)
+  .map(entry => entry?.deductibility_limitation)
   .filter(value => value !== null && value !== undefined);
 
 const eligibleUnderThisPolicy =

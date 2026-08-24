@@ -51,7 +51,7 @@ export interface Nonprofit {
   pub78_source_org_type_1?: string | null;
   pub78_source_org_type_2?: string | null;
   pub78_source_org_type_3?: string | null;
-  organization_types?: OrganizationType[] | null;
+  organization_types?: (OrganizationType | null)[] | null;
   most_recent_pub78?: string | null;
 
   // IRS Business Master File

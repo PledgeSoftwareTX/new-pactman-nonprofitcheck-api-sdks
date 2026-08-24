@@ -64,6 +64,10 @@ include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The live harness under scripts/ is not part of the distribution, so it is not
+# importable as a package. tests/test_contract_diff.py holds its diff rules,
+# which decide what counts as the API having changed.
+pythonpath = ["scripts"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error"]

@@ -19,6 +19,7 @@ interface ResponseContract {
   errorDetail: Record<string, string>;
   nonprofit: Record<string, string>;
   organizationType: Record<string, string>;
+  required: Record<string, string[]>;
 }
 
 const contract = JSON.parse(
@@ -57,6 +58,36 @@ function declaredMembers(name: string): Map<string, string> {
   expect(members.size, `interface ${name} was not found in types.ts`).toBeGreaterThan(0);
 
   return members;
+}
+
+/**
+ * Members declared without a `?`, which a response must therefore carry.
+ *
+ * Optionality is the only presence promise the package makes, so it is the only
+ * thing the live coverage check may fail on. Mirrored into the contract for the
+ * same reason nullability is: `contract.mjs` cannot read `types.ts`.
+ */
+function requiredMembers(name: string): string[] {
+  const required: string[] = [];
+
+  for (const statement of source.statements) {
+    if (!ts.isInterfaceDeclaration(statement) || statement.name.text !== name) {
+      continue;
+    }
+
+    for (const member of statement.members) {
+      if (
+        ts.isPropertySignature(member) &&
+        ts.isIdentifier(member.name) &&
+        !member.questionToken &&
+        !(name === 'ApiEnvelope' && member.name.text === 'data')
+      ) {
+        required.push(member.name.text);
+      }
+    }
+  }
+
+  return required.sort();
 }
 
 /** The token kinds a declared TypeScript type permits. */
@@ -139,6 +170,22 @@ describe('response contract', () => {
           allowed.split('|').includes('null'),
           `${interfaceName}.${field} is declared \`${type}\` but the contract says \`${allowed}\``,
         ).toBe(permittedBy(type).has('null'));
+      }
+    }
+  });
+
+  it.each(SHAPES)('%s requires exactly the fields %s declares without a `?`', (shape, interfaceName) => {
+    expect([...(contract.required[shape] ?? [])].sort()).toEqual(requiredMembers(interfaceName));
+  });
+
+  it('never requires a field it also declares optional', () => {
+    for (const [shape, interfaceName] of SHAPES) {
+      const declared = declaredMembers(interfaceName);
+
+      for (const field of contract.required[shape] ?? []) {
+        expect(declared.has(field), `${field} is required but absent from ${interfaceName}`).toBe(
+          true,
+        );
       }
     }
   });

@@ -24,7 +24,7 @@ export interface Pub78Source {
   source_org_type_1?: string | null;
   source_org_type_2?: string | null;
   source_org_type_3?: string | null;
-  organization_types?: OrganizationType[] | null;
+  organization_types?: (OrganizationType | null)[] | null;
   most_recent?: string | null;
 }
 

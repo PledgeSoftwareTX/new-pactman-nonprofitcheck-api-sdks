@@ -51,13 +51,15 @@ heading('Deductibility entries');
 if (!pub78.organization_types || pub78.organization_types.length === 0) {
   console.log('  No deductibility entries were returned.');
 } else {
+  // An entry can itself be null where Publication 78 has a row the API could
+  // not resolve, so read through it rather than into it.
   for (const [index, entry] of pub78.organization_types.entries()) {
-    const status = describeDeductibilityStatus(entry.deductibility_status_description);
+    const status = describeDeductibilityStatus(entry?.deductibility_status_description);
 
     console.log(`  [${index}]`);
     field('  deductibility_status_description', status.display, 34);
-    field('  deductibility_limitation', entry.deductibility_limitation, 34);
-    field('  organization_type', entry.organization_type, 34);
+    field('  deductibility_limitation', entry?.deductibility_limitation, 34);
+    field('  organization_type', entry?.organization_type, 34);
   }
 }
 
@@ -71,7 +73,7 @@ const policy = {
 };
 
 const limitations = (pub78.organization_types ?? [])
-  .map(entry => entry.deductibility_limitation)
+  .map(entry => entry?.deductibility_limitation)
   .filter(value => value !== null && value !== undefined);
 
 const listed = pub78.verified === true;
