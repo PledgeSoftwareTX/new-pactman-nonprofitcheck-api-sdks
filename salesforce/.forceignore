@@ -1,0 +1,8 @@
+# Metadata the CLI cannot deploy or that does not belong in the package.
+**/jsconfig.json
+**/.eslintrc.json
+**/.DS_Store
+
+# Never package the developer's own scratch-org config.
+config/**
+scripts/**

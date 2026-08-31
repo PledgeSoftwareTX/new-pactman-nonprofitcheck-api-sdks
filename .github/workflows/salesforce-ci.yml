@@ -1,0 +1,82 @@
+name: salesforce-sdk
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'salesforce/**'
+      - 'nodejs/src/response-contract.json'
+      - '.github/workflows/salesforce-ci.yml'
+  pull_request:
+    paths:
+      - 'salesforce/**'
+      - 'nodejs/src/response-contract.json'
+      - '.github/workflows/salesforce-ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: salesforce
+
+jobs:
+  # The parity assertions the other SDKs make inside their own test suites.
+  # Apex cannot read sfdx-project.json at runtime, so they run here.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Version and contract parity
+        run: node scripts/check-parity.mjs
+
+  apex:
+    runs-on: ubuntu-latest
+    needs: parity
+    env:
+      SF_DEVHUB_AUTH_URL: ${{ secrets.SF_DEVHUB_AUTH_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate the Dev Hub
+        if: env.SF_DEVHUB_AUTH_URL != ''
+        run: |
+          printf '%s' "$SF_DEVHUB_AUTH_URL" > /tmp/sfdx-auth-url.txt
+          sf org login sfdx-url --sfdx-url-file /tmp/sfdx-auth-url.txt --set-default-dev-hub --alias devhub
+          rm -f /tmp/sfdx-auth-url.txt
+
+      - name: Create a scratch org
+        if: env.SF_DEVHUB_AUTH_URL != ''
+        run: >
+          sf org create scratch --definition-file config/project-scratch-def.json
+          --alias ci --duration-days 1 --wait 20 --target-dev-hub devhub
+
+      - name: Deploy the package source
+        if: env.SF_DEVHUB_AUTH_URL != ''
+        run: sf project deploy start --target-org ci --wait 20
+
+      - name: Run the Apex tests
+        if: env.SF_DEVHUB_AUTH_URL != ''
+        run: >
+          sf apex run test --target-org ci --test-level RunLocalTests
+          --code-coverage --result-format human --wait 20
+
+      - name: Delete the scratch org
+        if: always() && env.SF_DEVHUB_AUTH_URL != ''
+        run: sf org delete scratch --target-org ci --no-prompt
+
+      - name: Explain the skip
+        if: env.SF_DEVHUB_AUTH_URL == ''
+        run: |
+          echo "SF_DEVHUB_AUTH_URL is not set, so the scratch-org run was skipped."
+          echo "Add it as a repository secret (sf org display --verbose --json | jq -r .result.sfdxAuthUrl)."
