@@ -38,12 +38,6 @@ FILING_REQUIREMENT = {
 }
 """IRS EO BMF ``FILING_REQ_CD`` — which annual return the organization files."""
 
-PF_FILING_REQUIREMENT = {
-    "0": "No 990-PF return required",
-    "1": "Form 990-PF required",
-}
-"""IRS EO BMF ``PF_FILING_REQ_CD`` — whether a 990-PF is required."""
-
 EXEMPT_STATUS = {
     "01": "Unconditional exemption",
     "02": "Conditional exemption",
@@ -102,10 +96,6 @@ def _lookup(table: dict[str, str], code: Any, label: str) -> CodeDescription:
 
 def describe_filing_requirement(code: Any) -> CodeDescription:
     return _lookup(FILING_REQUIREMENT, code, "filing requirement")
-
-
-def describe_pf_filing_requirement(code: Any) -> CodeDescription:
-    return _lookup(PF_FILING_REQUIREMENT, code, "private foundation filing requirement")
 
 
 def describe_exempt_status(code: Any) -> CodeDescription:

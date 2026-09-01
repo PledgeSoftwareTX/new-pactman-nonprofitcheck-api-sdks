@@ -47,12 +47,6 @@ def main() -> int:
     field("pub78_church_message", pick(pub78, "church_message"))
     field("most_recent_pub78", pick(pub78, "most_recent"))
 
-    heading("Source organization types")
-
-    for slot in (1, 2, 3):
-        code = pick(pub78, f"source_org_type_{slot}")
-        field(f"pub78_source_org_type_{slot}", describe_deductibility_status(code).display)
-
     heading("Deductibility entries")
 
     entries = pick(pub78, "organization_types")

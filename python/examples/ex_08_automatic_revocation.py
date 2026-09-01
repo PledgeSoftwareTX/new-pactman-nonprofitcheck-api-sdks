@@ -33,7 +33,6 @@ AUDITED_FIELDS = [
     "revocation_code",
     "revocation_date",
     "reinstatement_date",
-    "aroe_list_published_date",
     "bmf_status",
     "pub78_verified",
 ]
@@ -92,7 +91,6 @@ def main() -> int:
             field("revocation_code", pick(assessment.aroe, "revocation_code"))
             field("revocation_date", pick(assessment.aroe, "revocation_date"))
             field("reinstatement_date", pick(assessment.aroe, "reinstatement_date"))
-            field("aroe_list_published_date", pick(assessment.aroe, "list_published_date"))
 
             # Revocation shows up in the other sources too. Capture what each one
             # said, rather than letting one field speak for all of them.

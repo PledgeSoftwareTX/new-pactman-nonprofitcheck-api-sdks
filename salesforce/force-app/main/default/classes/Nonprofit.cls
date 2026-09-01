@@ -12,6 +12,14 @@
  * apart. Fields introduced by a newer API version than this SDK knows about are
  * readable through {@link DataObject.get}.
  *
+ * Declared here is what the production API returns. Some deployments serve
+ * additional source fields — the BMF address (`bmf_city`, `bmf_state`,
+ * `bmf_street_address`), `bmf_source_pf_filing_req_cd`, `bmf_deductability_text`,
+ * `pub78_source_org_type_1..3`, `ofac_list_published_date` and
+ * `aroe_list_published_date`. They are not declared because production does not
+ * return them; when it does, they stay readable through {@link DataObject.get},
+ * and this package will declare them in a release of its own.
+ *
  * Accessors are `snake_case` to match the wire format and the other Pactman
  * SDKs exactly — see {@link DataObject} for why.
  */
@@ -95,18 +103,6 @@ global class Nonprofit extends DataObject {
         get { return getString('pub78_indicator'); }
     }
 
-    global String pub78_source_org_type_1 {
-        get { return getString('pub78_source_org_type_1'); }
-    }
-
-    global String pub78_source_org_type_2 {
-        get { return getString('pub78_source_org_type_2'); }
-    }
-
-    global String pub78_source_org_type_3 {
-        get { return getString('pub78_source_org_type_3'); }
-    }
-
     global String most_recent_pub78 {
         get { return getString('most_recent_pub78'); }
     }
@@ -154,28 +150,8 @@ global class Nonprofit extends DataObject {
         get { return getString('bmf_ein'); }
     }
 
-    global String bmf_city {
-        get { return getString('bmf_city'); }
-    }
-
-    global String bmf_state {
-        get { return getString('bmf_state'); }
-    }
-
-    global String bmf_street_address {
-        get { return getString('bmf_street_address'); }
-    }
-
     global String bmf_subsection {
         get { return getString('bmf_subsection'); }
-    }
-
-    global String bmf_source_pf_filing_req_cd {
-        get { return getString('bmf_source_pf_filing_req_cd'); }
-    }
-
-    global String bmf_deductability_text {
-        get { return getString('bmf_deductability_text'); }
     }
 
     global String most_recent_bmf {
@@ -236,10 +212,6 @@ global class Nonprofit extends DataObject {
         get { return getString('ofac_status'); }
     }
 
-    global String ofac_list_published_date {
-        get { return getString('ofac_list_published_date'); }
-    }
-
     // IRS Automatic Revocation of Exemption
 
     global String revocation_code {
@@ -252,10 +224,6 @@ global class Nonprofit extends DataObject {
 
     global String reinstatement_date {
         get { return getString('reinstatement_date'); }
-    }
-
-    global String aroe_list_published_date {
-        get { return getString('aroe_list_published_date'); }
     }
 
     /** True when the IRS BMF and Publication 78 records disagree. */

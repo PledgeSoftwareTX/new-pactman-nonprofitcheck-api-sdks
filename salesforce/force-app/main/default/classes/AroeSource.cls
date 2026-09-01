@@ -16,8 +16,4 @@ global class AroeSource extends DataObject {
         get { return getString('reinstatement_date'); }
     }
 
-    global String list_published_date {
-        get { return getString('list_published_date'); }
-    }
-
 }

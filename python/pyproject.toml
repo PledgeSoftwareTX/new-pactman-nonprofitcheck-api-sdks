@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pactman-nonprofit-check-plus"
-version = "1.0.1"
+version = "2.0.0"
 description = "Official Python SDK for the Pactman Nonprofit Check Plus API — verify US nonprofits by EIN against IRS BMF, Publication 78, Automatic Revocation and OFAC data."
 readme = "README.md"
 license = "MIT"

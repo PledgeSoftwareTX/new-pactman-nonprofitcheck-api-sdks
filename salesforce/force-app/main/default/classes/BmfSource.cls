@@ -16,18 +16,6 @@ global class BmfSource extends DataObject {
         get { return getString('ein'); }
     }
 
-    global String city {
-        get { return getString('city'); }
-    }
-
-    global String state {
-        get { return getString('state'); }
-    }
-
-    global String street_address {
-        get { return getString('street_address'); }
-    }
-
     global String church_message {
         get { return getString('church_message'); }
     }
@@ -78,14 +66,6 @@ global class BmfSource extends DataObject {
 
     global String filing_req_code {
         get { return getString('filing_req_code'); }
-    }
-
-    global String pf_filing_req_cd {
-        get { return getString('pf_filing_req_cd'); }
-    }
-
-    global String deductability_text {
-        get { return getString('deductability_text'); }
     }
 
     global String most_recent {

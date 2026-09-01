@@ -710,17 +710,15 @@ if bmf is None:
 else:
     bmf.get("status")  # one source's answer to one question — there is no is_exempt here
     bmf.get("exempt_status_code")
-    bmf.get("deductability_text")
     bmf.get("most_recent")
 
-    bmf.get("organization_name"), bmf.get("ein"), bmf.get("street_address")
-    bmf.get("city"), bmf.get("state"), bmf.get("church_message")
+    bmf.get("organization_name"), bmf.get("ein"), bmf.get("church_message")
     bmf.get("subsection"), bmf.get("subsection_description")
     bmf.get("ruling_month"), bmf.get("ruling_year"), bmf.get("group_exemption")
     bmf.get("foundation_code"), bmf.get("foundation_code_description")
     bmf.get("foundation_type_code"), bmf.get("foundation_type_description")
     bmf.get("foundation_509a_status")
-    bmf.get("filing_req_code"), bmf.get("pf_filing_req_cd")
+    bmf.get("filing_req_code")
 
 # Reading the BMF in isolation is how a revoked or sanctioned organization
 # passes a check — see EX-08 and EX-10.
@@ -739,7 +737,6 @@ pub78.get("verified")  # True | False | None
 pub78.get("indicator")
 pub78.get("church_message")
 pub78.get("most_recent")
-pub78.get("source_org_type_1")  # …_2, …_3
 
 # An entry can itself be null, so guard before reading it.
 for entry in pub78.get("organization_types") or []:
@@ -791,7 +788,6 @@ AUDITED = [
     "revocation_code",
     "revocation_date",
     "reinstatement_date",
-    "aroe_list_published_date",
     "bmf_status",      # revocation shows up in the other sources too
     "pub78_verified",
 ]
@@ -934,15 +930,12 @@ classification_panel = {
     "foundation_code": bmf.get("foundation_code_description"),
     "foundation_type": bmf.get("foundation_type_description"),
     "status_509a": bmf.get("foundation_509a_status"),
-    "deductibility": bmf.get("deductability_text"),
     "entries": pub78.get("organization_types"),
 }
 
 # A private foundation grantee is not disqualified — it is routed differently,
 # because expenditure responsibility and the deductibility limit both change.
-is_private_foundation = (
-    bmf.get("foundation_type_code") == "pf" or bmf.get("pf_filing_req_cd") == "1"
-)
+is_private_foundation = bmf.get("foundation_type_code") == "pf"
 ```
 
 #### EX-13 — Filing and exemption metadata
@@ -1006,8 +999,6 @@ timestamps = {
     "report_date": nonprofit.get("report_date"),        # when this response was generated
     "most_recent_bmf": nonprofit.get("most_recent_bmf"),  # when each list was last refreshed
     "most_recent_pub78": nonprofit.get("most_recent_pub78"),
-    "ofac_list_published_date": nonprofit.get("ofac_list_published_date"),
-    "aroe_list_published_date": nonprofit.get("aroe_list_published_date"),
 }
 
 now = datetime.now()

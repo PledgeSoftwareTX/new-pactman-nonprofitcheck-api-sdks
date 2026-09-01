@@ -21,7 +21,6 @@ from lib.irs_codes import (
     CodeDescription,
     describe_exempt_status,
     describe_filing_requirement,
-    describe_pf_filing_requirement,
     format_ruling_date,
 )
 from lib.print import field, heading, note, pick, render
@@ -60,10 +59,6 @@ def main() -> int:
             code_row(
                 "filing_req_code",
                 describe_filing_requirement(pick(bmf, "filing_req_code")),
-            )
-            code_row(
-                "bmf_source_pf_filing_req_cd",
-                describe_pf_filing_requirement(pick(bmf, "pf_filing_req_cd")),
             )
             code_row(
                 "exempt_status_code",

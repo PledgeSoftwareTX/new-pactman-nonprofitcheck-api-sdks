@@ -38,12 +38,14 @@ class TestSourceProjections:
 
     def test_renames_only_where_the_wire_prefix_differs(self) -> None:
         bmf = get_bmf(
-            fixture(bmf_source_pf_filing_req_cd="0", bmf_deductability_text="Contributions are deductible")
+            fixture(most_recent_bmf="12/09/2025 12:00:00 AM", subsection_description="501(c)(3) Public Charity")
         )
 
         assert bmf is not None
-        assert bmf["pf_filing_req_cd"] == "0"
-        assert bmf["deductability_text"] == "Contributions are deductible"
+        # The wire name is suffixed, not `bmf_`-prefixed.
+        assert bmf["most_recent"] == "12/09/2025 12:00:00 AM"
+        # And this one carries no source prefix at all, so it passes through.
+        assert bmf["subsection_description"] == "501(c)(3) Public Charity"
 
     def test_maps_automatic_revocation_fields_from_the_response(self) -> None:
         aroe = get_aroe(
@@ -51,7 +53,6 @@ class TestSourceProjections:
                 revocation_code="1",
                 revocation_date="5/15/2020",
                 reinstatement_date="8/1/2021",
-                aroe_list_published_date="12/10/2025",
             )
         )
 
@@ -59,7 +60,6 @@ class TestSourceProjections:
         assert aroe["revocation_code"] == "1"
         assert aroe["revocation_date"] == "5/15/2020"
         assert aroe["reinstatement_date"] == "8/1/2021"
-        assert aroe["list_published_date"] == "12/10/2025"
 
     def test_maps_ofac_fields_verbatim_without_deriving_a_boolean(self) -> None:
         ofac = get_ofac(fixture())
@@ -68,7 +68,7 @@ class TestSourceProjections:
         assert isinstance(ofac["status"], str)
         assert "NOT included" in ofac["status"]
         # The projection must not invent a match flag from the wording.
-        assert set(ofac) <= {"status", "list_published_date"}
+        assert set(ofac) <= {"status"}
 
     def test_keeps_a_missing_source_distinct_from_an_explicit_negative(self) -> None:
         empty: Nonprofit = {"ein": "411787097"}

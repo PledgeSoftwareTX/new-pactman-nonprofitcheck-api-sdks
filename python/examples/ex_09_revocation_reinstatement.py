@@ -27,7 +27,6 @@ RETAINED_FIELDS = [
     "revocation_date",
     "reinstatement_date",
     "revocation_code",
-    "aroe_list_published_date",
 ]
 
 QUESTIONS_REINSTATEMENT_DOES_NOT_ANSWER = [
@@ -57,7 +56,6 @@ def main() -> int:
     field("revocation_code", pick(aroe, "revocation_code"))
     field("revocation_date", pick(aroe, "revocation_date"))
     field("reinstatement_date", pick(aroe, "reinstatement_date"))
-    field("aroe_list_published_date", pick(aroe, "list_published_date"))
 
     revoked_at = parse_api_date(pick(aroe, "revocation_date"))
     reinstated_at = parse_api_date(pick(aroe, "reinstatement_date"))

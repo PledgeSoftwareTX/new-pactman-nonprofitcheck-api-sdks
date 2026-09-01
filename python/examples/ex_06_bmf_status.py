@@ -20,7 +20,6 @@ from lib.fixture_api import FIXTURE_EINS
 from lib.irs_codes import (
     describe_exempt_status,
     describe_filing_requirement,
-    describe_pf_filing_requirement,
     format_ruling_date,
 )
 from lib.print import field, heading, note, pick
@@ -50,15 +49,11 @@ def main() -> int:
     heading("BMF status")
     field("bmf_status", pick(bmf, "status"))
     field("exempt_status_code", describe_exempt_status(pick(bmf, "exempt_status_code")).display)
-    field("bmf_deductability_text", pick(bmf, "deductability_text"))
     field("most_recent_bmf", pick(bmf, "most_recent"))
 
     heading("BMF identity")
     field("bmf_organization_name", pick(bmf, "organization_name"))
     field("bmf_ein", pick(bmf, "ein"))
-    field("bmf_street_address", pick(bmf, "street_address"))
-    field("bmf_city", pick(bmf, "city"))
-    field("bmf_state", pick(bmf, "state"))
     field("bmf_church_message", pick(bmf, "church_message"))
 
     heading("Subsection")
@@ -83,10 +78,6 @@ def main() -> int:
 
     heading("Filing requirements")
     field("filing_req_code", describe_filing_requirement(pick(bmf, "filing_req_code")).display)
-    field(
-        "bmf_source_pf_filing_req_cd",
-        describe_pf_filing_requirement(pick(bmf, "pf_filing_req_cd")).display,
-    )
 
     # Every value above came straight off the response. Turning them into an
     # approve/decline decision is the next step, and it belongs in your policy

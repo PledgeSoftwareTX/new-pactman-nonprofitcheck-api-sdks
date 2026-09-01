@@ -17,10 +17,20 @@ from __future__ import annotations
 from typing import Any
 
 from lib.fixture_api import FIXTURE_EINS, fixture_api
-from lib.irs_codes import describe_deductibility_status, describe_pf_filing_requirement
+from lib.irs_codes import describe_deductibility_status
 from lib.print import field, heading, note, pick
 
 from pactman_nonprofit_check_plus import Nonprofit, get_bmf, get_pub78
+
+
+def _first_deductibility_status(pub78: Any) -> Any:
+    """The first Publication 78 entry's status code, reading through a null entry."""
+    entries = pick(pub78, "organization_types")
+
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    return pick(entries[0], "deductibility_status_description")
 
 
 def classification_panel(nonprofit: Nonprofit) -> dict[str, Any]:
@@ -36,12 +46,8 @@ def classification_panel(nonprofit: Nonprofit) -> dict[str, Any]:
         "foundation type code": pick(bmf, "foundation_type_code"),
         "foundation type description": pick(bmf, "foundation_type_description"),
         "509(a) status": pick(bmf, "foundation_509a_status"),
-        "deductibility text": pick(bmf, "deductability_text"),
-        "990-PF filing requirement": describe_pf_filing_requirement(
-            pick(bmf, "pf_filing_req_cd")
-        ).display,
-        "Pub 78 org type 1": describe_deductibility_status(
-            pick(pub78, "source_org_type_1")
+        "Pub 78 deductibility": describe_deductibility_status(
+            _first_deductibility_status(pub78)
         ).display,
     }
 
@@ -78,10 +84,7 @@ def main() -> int:
             # differently, because expenditure responsibility and the
             # deductibility limit both change.
             bmf = get_bmf(nonprofit)
-            is_private_foundation = (
-                pick(bmf, "foundation_type_code") == "pf"
-                or pick(bmf, "pf_filing_req_cd") == "1"
-            )
+            is_private_foundation = pick(bmf, "foundation_type_code") == "pf"
 
             field(
                 "\nthis application routes to",

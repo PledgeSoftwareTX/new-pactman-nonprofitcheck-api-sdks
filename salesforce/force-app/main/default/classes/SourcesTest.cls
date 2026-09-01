@@ -49,15 +49,16 @@ private class SourcesTest {
     }
 
     @IsTest
-    static void aroeMapsThePrefixedListDate() {
+    static void bmfMapsTheSuffixedExtractDate() {
         Nonprofit nonprofit = new Nonprofit(new Map<String, Object>{
-            'revocation_code' => 'A',
-            'aroe_list_published_date' => '2026-07-01'
+            'bmf_status' => true,
+            'most_recent_bmf' => '2026-07-01'
         });
-        AroeSource aroe = Sources.getAroe(nonprofit);
+        BmfSource bmf = Sources.getBmf(nonprofit);
 
-        Assert.areEqual('A', aroe.revocation_code);
-        Assert.areEqual('2026-07-01', aroe.list_published_date);
+        Assert.areEqual(true, bmf.status);
+        // The wire name is suffixed, not `bmf_`-prefixed, and still projects.
+        Assert.areEqual('2026-07-01', bmf.most_recent);
     }
 
     @IsTest

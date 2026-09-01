@@ -32,18 +32,6 @@ global class Pub78Source extends DataObject {
         get { return getString('church_message'); }
     }
 
-    global String source_org_type_1 {
-        get { return getString('source_org_type_1'); }
-    }
-
-    global String source_org_type_2 {
-        get { return getString('source_org_type_2'); }
-    }
-
-    global String source_org_type_3 {
-        get { return getString('source_org_type_3'); }
-    }
-
     global String most_recent {
         get { return getString('most_recent'); }
     }

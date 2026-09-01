@@ -72,8 +72,6 @@ def oldest_source_age_days(nonprofit: Nonprofit, now: datetime | None = None) ->
         for parsed in (
             parse_api_date(nonprofit.get("most_recent_bmf")),
             parse_api_date(nonprofit.get("most_recent_pub78")),
-            parse_api_date(nonprofit.get("ofac_list_published_date")),
-            parse_api_date(nonprofit.get("aroe_list_published_date")),
             parse_api_date(nonprofit.get("organization_info_last_modified")),
         )
         if parsed is not None

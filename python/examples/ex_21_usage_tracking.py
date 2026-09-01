@@ -2,20 +2,20 @@
 EX-21 — Billing-cycle usage tracking.
 
 ``nonprofit_check_count``, surfaced as ``result.check_count``, is the running
-total of checks your account has consumed **so far in the current billing
-cycle**. It resets to zero when a new cycle starts.
+total of checks your account has consumed so far in the current billing cycle.
+It is never the size of the request you just made.
 
-It is NOT the size of the request you just made. A bulk call for five EINs does
-not return 5; it returns your cycle total including those five. Read it as a
-gauge, and take the size of a request from the request.
+The test is one thing: the API sends that counter as a JSON number. The SDK maps
+anything else to ``None``, which downstream is indistinguishable from "not
+reported", so the check reads the uncoerced value off ``raw``. This example
+exits non-zero when any response fails it.
 
 Run:  PACTMAN_API_KEY=... python examples/ex_21_usage_tracking.py
 """
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
+import json
 from typing import Any
 
 from lib.fixture_api import FIXTURE_EINS, fixture_api
@@ -24,104 +24,112 @@ from lib.print import bullet, field, heading, note
 from pactman_nonprofit_check_plus import PactmanResult
 
 
-class Telemetry:
-    """What an admin screen or a metrics exporter would hold."""
+def json_type(value: Any) -> str:
+    """The JSON type of a value, in the vocabulary the response contract uses."""
+    if value is None:
+        return "null"
 
-    def __init__(self) -> None:
-        self.cycle_total: int | None = None
-        self.observed_at: str | None = None
-        self.samples: list[dict[str, Any]] = []
+    # Before int: ``True`` is an ``int`` in Python, and a boolean counter is not
+    # a number the API is allowed to send.
+    if isinstance(value, bool):
+        return "boolean"
 
-    def record(self, label: str, requested: int, result: PactmanResult) -> None:
-        previous = self.cycle_total
+    if isinstance(value, (int, float)):
+        return "number"
 
-        self.cycle_total = result.check_count
-        self.observed_at = datetime.now(timezone.utc).isoformat()
-        self.samples.append(
-            {
-                "label": label,
-                "requested": requested,
-                "cycle_total": result.check_count,
-                "delta": None
-                if previous is None or result.check_count is None
-                else result.check_count - previous,
-                "request_id": result.request_id,
-            }
-        )
+    if isinstance(value, str):
+        return "string"
+
+    if isinstance(value, (list, tuple)):
+        return "array"
+
+    if isinstance(value, dict):
+        return "object"
+
+    return type(value).__name__
+
+
+def wire_check_count(result: PactmanResult) -> str:
+    """
+    How ``nonprofit_check_count`` arrived, before this SDK read it.
+
+    ``check_count`` is ``int | None``, and the SDK produces that ``None`` both
+    for a counter the API sent as null and for one it sent as ``"42"``. Only
+    ``raw``, which nothing has coerced, tells them apart.
+    """
+    envelope = result.raw
+
+    if not isinstance(envelope, dict) or "nonprofit_check_count" not in envelope:
+        return "<not returned>"
+
+    value = envelope["nonprofit_check_count"]
+    wire_type = json_type(value)
+
+    return "number" if wire_type == "number" else f"{wire_type} {json.dumps(value)}"
 
 
 def main() -> int:
-    telemetry = Telemetry()
-
     with fixture_api() as client:
-        telemetry.record(
-            "single check", 1, client.nonprofits.check(FIXTURE_EINS["public_charity"])
-        )
-        telemetry.record(
-            "single check", 1, client.nonprofits.check(FIXTURE_EINS["public_charity_second"])
-        )
-        telemetry.record(
-            "bulk check",
-            3,
-            client.nonprofits.check_bulk(
-                [
-                    FIXTURE_EINS["public_charity"],
-                    FIXTURE_EINS["public_charity_second"],
-                    FIXTURE_EINS["private_foundation"],
-                ]
+        responses = [
+            ("single check", client.nonprofits.check(FIXTURE_EINS["public_charity"])),
+            ("single check", client.nonprofits.check(FIXTURE_EINS["public_charity_second"])),
+            (
+                "bulk check of 3",
+                client.nonprofits.check_bulk(
+                    [
+                        FIXTURE_EINS["public_charity"],
+                        FIXTURE_EINS["public_charity_second"],
+                        FIXTURE_EINS["private_foundation"],
+                    ]
+                ),
             ),
-        )
-        telemetry.record(
-            "bulk with a miss",
-            2,
-            client.nonprofits.check_bulk(
-                [FIXTURE_EINS["revoked"], FIXTURE_EINS["no_record"]]
+            (
+                "bulk with a miss",
+                client.nonprofits.check_bulk(
+                    [FIXTURE_EINS["revoked"], FIXTURE_EINS["no_record"]]
+                ),
             ),
-        )
+        ]
 
-    heading("nonprofit_check_count across four requests")
-    print(f"  {'request'.ljust(20)} {'EINs sent'.ljust(11)} {'cycle total'.ljust(13)} delta")
+        samples = [
+            {
+                "label": label,
+                "wire": wire_check_count(result),
+                "check_count": result.check_count,
+            }
+            for label, result in responses
+        ]
 
-    for sample in telemetry.samples:
+    heading("nonprofit_check_count on the wire")
+    print(f"  {'request'.ljust(20)} {'wire type'.ljust(20)} check_count")
+
+    for sample in samples:
         print(
-            f"  {sample['label'].ljust(20)} {str(sample['requested']).ljust(11)}"
-            f" {str(sample['cycle_total']).ljust(13)}"
-            f" {sample['delta'] if sample['delta'] is not None else '—'}"
+            f"  {str(sample['label']).ljust(20)} {str(sample['wire']).ljust(20)}"
+            f" {sample['check_count']}"
         )
 
-    heading("Reading the numbers")
-    bullet("The cycle total climbs across requests. It is cumulative, not per-request.")
-    bullet("The delta is what a request consumed — derive it, or count what you sent.")
-    bullet("EINs with no record are not billed, so a delta can be smaller than the batch.")
-    bullet("At the start of a new billing cycle this counter resets to zero.")
+    mistyped = [sample for sample in samples if sample["wire"] != "number"]
 
-    heading("Operational surface")
-    field("checks used this cycle", telemetry.cycle_total)
-    field("observed at", telemetry.observed_at)
-    field("last request_id", telemetry.samples[-1]["request_id"] if telemetry.samples else None)
+    heading("Verdict")
+    field("responses inspected", len(samples))
+    field("sent as a JSON number", len(samples) - len(mistyped))
 
-    # Alerting on the cycle total needs your plan's allowance, which the check
-    # endpoints do not report. Keep it in your own configuration.
-    plan_allowance = int(os.environ.get("PACTMAN_PLAN_ALLOWANCE") or 0)
-
-    if plan_allowance > 0:
-        used = telemetry.cycle_total or 0
-        field("plan allowance", plan_allowance)
-        field("utilisation", f"{round(used / plan_allowance * 100)}%")
-        field(
-            "alert",
-            "over 80% of the cycle allowance"
-            if used / plan_allowance > 0.8
-            else "nominal",
-        )
-    else:
-        bullet("Set PACTMAN_PLAN_ALLOWANCE to compute utilisation against your plan.")
+    for sample in mistyped:
+        bullet(f"{sample['label']}: the API sent {sample['wire']}, so check_count reads None")
 
     note(
-        'Label this metric "checks used this billing cycle" wherever it is displayed.\n'
-        'Labelling it "checks in this request" makes a dashboard that resets monthly\n'
-        "look like a dashboard that is broken."
+        "The counter is cumulative for the billing cycle and resets when a new one starts.\n"
+        "A bulk call for five EINs does not return 5 — it returns your cycle total."
     )
+
+    if mistyped:
+        print(
+            f"\n{len(mistyped)} of {len(samples)} responses did not send"
+            " nonprofit_check_count as a number."
+        )
+
+        return 1
 
     return 0
 

@@ -14,8 +14,4 @@ global class OfacSource extends DataObject {
         get { return getString('status'); }
     }
 
-    global String list_published_date {
-        get { return getString('list_published_date'); }
-    }
-
 }

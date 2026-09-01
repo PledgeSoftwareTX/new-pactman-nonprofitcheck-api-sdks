@@ -54,6 +54,8 @@ FIXTURE_EINS = {
     "conflicted": "521693387",
     # Carries fields and an enum value this SDK version does not know about.
     "future_fields": "237324370",
+    # Production's shape plus the source fields only newer deployments return.
+    "pending_source_fields": "046001341",
     # Well-formed, but no record exists.
     "no_record": "999999999",
 }
@@ -140,21 +142,13 @@ def _public_charity(
         "pub78_city": "Westfield",
         "pub78_state": "MA",
         "pub78_indicator": "0",
-        "pub78_source_org_type_1": "PC",
-        "pub78_source_org_type_2": None,
-        "pub78_source_org_type_3": None,
         "organization_types": [DEDUCTIBILITY_PUBLIC_CHARITY],
         "most_recent_pub78": api_date(26),
         "bmf_church_message": None,
         "bmf_organization_name": name.upper(),
         "bmf_ein": ein,
         "bmf_status": True,
-        "bmf_city": "WESTFIELD",
-        "bmf_state": "MA",
-        "bmf_street_address": "50 LOWELL AVE APT 3B",
         "bmf_subsection": "03",
-        "bmf_source_pf_filing_req_cd": "0",
-        "bmf_deductability_text": "Contributions are deductible",
         "most_recent_bmf": api_date(20),
         "subsection_description": "501(c)(3) Public Charity",
         "foundation_code": "10",
@@ -167,11 +161,9 @@ def _public_charity(
         "group_exemption": "0000",
         "exempt_status_code": "01",
         "ofac_status": OFAC_NO_MATCH,
-        "ofac_list_published_date": api_date(5),
         "revocation_code": None,
         "revocation_date": None,
         "reinstatement_date": None,
-        "aroe_list_published_date": api_date(12),
         "irs_bmf_pub78_conflict": False,
         "report_date": api_date(0),
     }
@@ -202,7 +194,6 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
             "zip": "01103-1420",
             "address_line1": "19 HAMPDEN ST",
             "address_line2": None,
-            "bmf_street_address": "19 HAMPDEN ST",
         },
     ),
     FIXTURE_EINS["private_foundation"]: _public_charity(
@@ -210,13 +201,10 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
         "Hartwell Family Example Foundation",
         {
             "organization_name_aka": None,
-            # A private foundation files a 990-PF, tracked in the PF field below
-            # rather than in the general 990 filing requirement.
+            # A private foundation files a 990-PF, so it carries no general 990
+            # filing requirement.
             "filing_req_code": "00",
-            "pub78_source_org_type_1": "PF",
             "organization_types": [DEDUCTIBILITY_PRIVATE_FOUNDATION],
-            "bmf_source_pf_filing_req_cd": "1",
-            "bmf_deductability_text": "Contributions are deductible",
             "subsection_description": "501(c)(3) Private Foundation",
             "foundation_code": "04",
             "foundation_code_description": "Private non-operating foundation",
@@ -242,16 +230,13 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
             "zip": None,
             "pub78_city": None,
             "pub78_state": None,
-            "bmf_city": None,
-            "bmf_state": None,
-            "bmf_street_address": None,
             "group_exemption": None,
             "ruling_month": None,
             "ruling_year": None,
         },
-        # No OFAC keys at all: the source was not reported for this organization,
+        # No OFAC key at all: the source was not reported for this organization,
         # which is not the same as a null status or a no-match result.
-        ["ofac_status", "ofac_list_published_date"],
+        ["ofac_status"],
     ),
     # Every address component is present, and they contradict one another: the
     # state code says Massachusetts, the state name and the ZIP say Maine, and
@@ -270,9 +255,6 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
             "zip": "04856",
             "pub78_city": "Rockport",
             "pub78_state": "MA",
-            "bmf_city": "ROCKPORT",
-            "bmf_state": "MA",
-            "bmf_street_address": "12 SEA STREET",
         },
     ),
     # Nothing adverse, but every source is well out of date. A workflow with a
@@ -284,8 +266,6 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
             "organization_info_last_modified": api_date(700),
             "most_recent_pub78": api_date(640),
             "most_recent_bmf": api_date(610),
-            "ofac_list_published_date": api_date(580),
-            "aroe_list_published_date": api_date(560),
         },
     ),
     FIXTURE_EINS["revoked"]: _public_charity(
@@ -297,7 +277,6 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
             "pub78_indicator": None,
             "organization_types": None,
             "bmf_status": False,
-            "bmf_deductability_text": "Contributions are not deductible",
             "subsection_description": "501(c)(3) Public Charity",
             "exempt_status_code": "25",
             "revocation_code": "01",
@@ -327,7 +306,7 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
     FIXTURE_EINS["ofac_unavailable"]: _public_charity(
         FIXTURE_EINS["ofac_unavailable"],
         "Riverbend Example Coalition",
-        {"ofac_status": None, "ofac_list_published_date": None},
+        {"ofac_status": None},
     ),
     # BMF says exempt, Publication 78 does not list the organization, and the API
     # flags the disagreement rather than picking a winner.
@@ -372,6 +351,29 @@ FIXTURE_ORGANIZATIONS: dict[str, dict[str, Any]] = {
                 "matches": 0,
                 "list_published_date": api_date(5),
             },
+        },
+    ),
+    # A deployment running ahead of production. Every other fixture is the shape
+    # entities.pactman.org returns today; this one adds the ten source fields
+    # that are built but not yet released there. This package deliberately does
+    # not declare them (see ``Nonprofit`` in types.py), so they exercise the path
+    # that keeps undeclared fields readable off the response and through ``raw``
+    # instead of dropping them.
+    FIXTURE_EINS["pending_source_fields"]: _public_charity(
+        FIXTURE_EINS["pending_source_fields"],
+        "Ahead Of Production Example Fund",
+        {
+            "organization_name_aka": None,
+            "pub78_source_org_type_1": "PC",
+            "pub78_source_org_type_2": None,
+            "pub78_source_org_type_3": None,
+            "bmf_city": "WESTFIELD",
+            "bmf_state": "MA",
+            "bmf_street_address": "50 LOWELL AVE APT 3B",
+            "bmf_source_pf_filing_req_cd": "0",
+            "bmf_deductability_text": "Contributions are deductible",
+            "ofac_list_published_date": api_date(5),
+            "aroe_list_published_date": api_date(12),
         },
     ),
 }

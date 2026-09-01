@@ -36,6 +36,15 @@ class Nonprofit(TypedDict, total=False):
     (``pub78_*``, ``bmf_*``, ``ofac_*``, and the revocation fields for the IRS
     Automatic Revocation of Exemption list). See :mod:`.sources` for grouped
     views.
+
+    Declared here is what the production API returns. Some deployments serve
+    additional source fields — the BMF address (``bmf_city``, ``bmf_state``,
+    ``bmf_street_address``), ``bmf_source_pf_filing_req_cd``,
+    ``bmf_deductability_text``, ``pub78_source_org_type_1..3``,
+    ``ofac_list_published_date`` and ``aroe_list_published_date``. They are not
+    declared because production does not return them; when it does, they stay
+    readable off the response mapping and through ``raw``, and this package will
+    declare them in a release of its own.
     """
 
     # Pactman
@@ -62,9 +71,6 @@ class Nonprofit(TypedDict, total=False):
     pub78_city: str | None
     pub78_state: str | None
     pub78_indicator: str | None
-    pub78_source_org_type_1: str | None
-    pub78_source_org_type_2: str | None
-    pub78_source_org_type_3: str | None
     organization_types: list[OrganizationType | None] | None
     most_recent_pub78: str | None
 
@@ -73,12 +79,7 @@ class Nonprofit(TypedDict, total=False):
     bmf_organization_name: str | None
     bmf_ein: str | None
     bmf_status: bool | None
-    bmf_city: str | None
-    bmf_state: str | None
-    bmf_street_address: str | None
     bmf_subsection: str | None
-    bmf_source_pf_filing_req_cd: str | None
-    bmf_deductability_text: str | None
     most_recent_bmf: str | None
     subsection_description: str | None
     foundation_code: str | None
@@ -96,13 +97,11 @@ class Nonprofit(TypedDict, total=False):
     # The API returns a sentence, not a flag — do not pattern-match it to derive
     # a boolean. Read it, or present it to a reviewer.
     ofac_status: str | None
-    ofac_list_published_date: str | None
 
     # IRS Automatic Revocation of Exemption
     revocation_code: str | None
     revocation_date: str | None
     reinstatement_date: str | None
-    aroe_list_published_date: str | None
 
     # True when the IRS BMF and Publication 78 records disagree.
     irs_bmf_pub78_conflict: bool | None

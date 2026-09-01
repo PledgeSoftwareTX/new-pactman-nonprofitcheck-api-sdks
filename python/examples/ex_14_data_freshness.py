@@ -32,8 +32,6 @@ TIMESTAMP_FIELDS = [
     "report_date",
     "most_recent_bmf",
     "most_recent_pub78",
-    "ofac_list_published_date",
-    "aroe_list_published_date",
 ]
 
 

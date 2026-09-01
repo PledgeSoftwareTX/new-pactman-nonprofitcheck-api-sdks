@@ -45,7 +45,6 @@ ROUTING = {
 class OfacFinding:
     state: str
     status: Any
-    published_date: Any
 
 
 def classify_ofac(nonprofit: Nonprofit) -> OfacFinding:
@@ -59,21 +58,20 @@ def classify_ofac(nonprofit: Nonprofit) -> OfacFinding:
     ofac = get_ofac(nonprofit)
 
     if ofac is None:
-        return OfacFinding("unavailable", NOT_RETURNED, NOT_RETURNED)
+        return OfacFinding("unavailable", NOT_RETURNED)
 
     status = pick(ofac, "status")
-    published_date = pick(ofac, "list_published_date")
 
     if status is None or status is NOT_RETURNED:
-        return OfacFinding("null", status, published_date)
+        return OfacFinding("null", status)
 
     if _UID.search(str(status)):
-        return OfacFinding("match", status, published_date)
+        return OfacFinding("match", status)
 
     if _NOT_INCLUDED.search(str(status)):
-        return OfacFinding("no_match", status, published_date)
+        return OfacFinding("no_match", status)
 
-    return OfacFinding("needs_review", status, published_date)
+    return OfacFinding("needs_review", status)
 
 
 def main() -> int:
@@ -96,7 +94,6 @@ def main() -> int:
 
             heading(f"{label} — {nonprofit.get('organization_name')}")
             field("ofac_status", finding.status)
-            field("ofac_list_published_date", finding.published_date)
             field(
                 "get_ofac() returned",
                 "None (no OFAC fields)" if get_ofac(nonprofit) is None else "a dict",

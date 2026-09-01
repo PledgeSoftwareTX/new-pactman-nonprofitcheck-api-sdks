@@ -27,9 +27,6 @@ class Pub78Source(TypedDict, total=False):
     state: str | None
     indicator: str | None
     church_message: str | None
-    source_org_type_1: str | None
-    source_org_type_2: str | None
-    source_org_type_3: str | None
     organization_types: list[OrganizationType | None] | None
     most_recent: str | None
 
@@ -40,9 +37,6 @@ class BmfSource(TypedDict, total=False):
     status: bool | None
     organization_name: str | None
     ein: str | None
-    city: str | None
-    state: str | None
-    street_address: str | None
     church_message: str | None
     subsection: str | None
     subsection_description: str | None
@@ -56,8 +50,6 @@ class BmfSource(TypedDict, total=False):
     group_exemption: str | None
     exempt_status_code: str | None
     filing_req_code: str | None
-    pf_filing_req_cd: str | None
-    deductability_text: str | None
     most_recent: str | None
 
 
@@ -67,7 +59,6 @@ class AroeSource(TypedDict, total=False):
     revocation_code: str | None
     revocation_date: str | None
     reinstatement_date: str | None
-    list_published_date: str | None
 
 
 class OfacSource(TypedDict, total=False):
@@ -80,8 +71,6 @@ class OfacSource(TypedDict, total=False):
     one by matching on the wording.
     """
 
-    list_published_date: str | None
-
 
 _PUB78_FIELDS = {
     "verified": "pub78_verified",
@@ -91,9 +80,6 @@ _PUB78_FIELDS = {
     "state": "pub78_state",
     "indicator": "pub78_indicator",
     "church_message": "pub78_church_message",
-    "source_org_type_1": "pub78_source_org_type_1",
-    "source_org_type_2": "pub78_source_org_type_2",
-    "source_org_type_3": "pub78_source_org_type_3",
     "organization_types": "organization_types",
     "most_recent": "most_recent_pub78",
 }
@@ -102,9 +88,6 @@ _BMF_FIELDS = {
     "status": "bmf_status",
     "organization_name": "bmf_organization_name",
     "ein": "bmf_ein",
-    "city": "bmf_city",
-    "state": "bmf_state",
-    "street_address": "bmf_street_address",
     "church_message": "bmf_church_message",
     "subsection": "bmf_subsection",
     "subsection_description": "subsection_description",
@@ -118,8 +101,6 @@ _BMF_FIELDS = {
     "group_exemption": "group_exemption",
     "exempt_status_code": "exempt_status_code",
     "filing_req_code": "filing_req_code",
-    "pf_filing_req_cd": "bmf_source_pf_filing_req_cd",
-    "deductability_text": "bmf_deductability_text",
     "most_recent": "most_recent_bmf",
 }
 
@@ -127,12 +108,10 @@ _AROE_FIELDS = {
     "revocation_code": "revocation_code",
     "revocation_date": "revocation_date",
     "reinstatement_date": "reinstatement_date",
-    "list_published_date": "aroe_list_published_date",
 }
 
 _OFAC_FIELDS = {
     "status": "ofac_status",
-    "list_published_date": "ofac_list_published_date",
 }
 
 
