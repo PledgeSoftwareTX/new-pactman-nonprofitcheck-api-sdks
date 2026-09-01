@@ -1,6 +1,6 @@
 {
   "note": "The shape production returned when this was recorded: path, JSON type and value format, never a value. Committed, so every run of scripts/smoke-live.mjs is held against the same recording — any path added or removed, and any token that changed, fails there. Rewrite it with `npm run baseline:record` only when production has moved and the move is intended.",
-  "recordedAt": "2026-08-24T10:07:09.503Z",
+  "recordedAt": "2026-08-31T15:42:51.231Z",
   "baseUrl": "https://entities.pactman.org",
   "sdkVersion": "1.0.6",
   "single": {

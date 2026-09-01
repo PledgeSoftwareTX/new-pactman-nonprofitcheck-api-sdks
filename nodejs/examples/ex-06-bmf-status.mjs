@@ -17,7 +17,6 @@ import { FIXTURE_EINS } from './lib/fixture-api.mjs';
 import {
   describeExemptStatus,
   describeFilingRequirement,
-  describePfFilingRequirement,
   formatRulingDate,
 } from './lib/irs-codes.mjs';
 
@@ -44,15 +43,11 @@ if (bmf === null) {
 heading('BMF status');
 field('bmf_status', bmf.status);
 field('exempt_status_code', describeExemptStatus(bmf.exempt_status_code).display);
-field('bmf_deductability_text', bmf.deductability_text);
 field('most_recent_bmf', bmf.most_recent);
 
 heading('BMF identity');
 field('bmf_organization_name', bmf.organization_name);
 field('bmf_ein', bmf.ein);
-field('bmf_street_address', bmf.street_address);
-field('bmf_city', bmf.city);
-field('bmf_state', bmf.state);
 field('bmf_church_message', bmf.church_message);
 
 heading('Subsection');
@@ -74,7 +69,6 @@ field('foundation_509a_status', bmf.foundation_509a_status);
 
 heading('Filing requirements');
 field('filing_req_code', describeFilingRequirement(bmf.filing_req_code).display);
-field('bmf_source_pf_filing_req_cd', describePfFilingRequirement(bmf.pf_filing_req_cd).display);
 
 // Every value above came straight off the response. Turning them into an
 // approve/decline decision is the next step, and it belongs in your policy code

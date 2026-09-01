@@ -31,12 +31,6 @@ const FILING_REQUIREMENT = {
   '14': 'Not required to file (state instrumentality)',
 };
 
-/** IRS EO BMF `PF_FILING_REQ_CD` — whether a 990-PF is required. */
-const PF_FILING_REQUIREMENT = {
-  '0': 'No 990-PF return required',
-  '1': 'Form 990-PF required',
-};
-
 /** IRS EO BMF `STATUS` — the exemption status the BMF carries. */
 const EXEMPT_STATUS = {
   '01': 'Unconditional exemption',
@@ -80,8 +74,6 @@ function lookup(table, code, label) {
 }
 
 export const describeFilingRequirement = code => lookup(FILING_REQUIREMENT, code, 'filing requirement');
-export const describePfFilingRequirement = code =>
-  lookup(PF_FILING_REQUIREMENT, code, 'private foundation filing requirement');
 export const describeExemptStatus = code => lookup(EXEMPT_STATUS, code, 'exempt status');
 export const describeDeductibilityStatus = code =>
   lookup(DEDUCTIBILITY_STATUS, code, 'deductibility status');

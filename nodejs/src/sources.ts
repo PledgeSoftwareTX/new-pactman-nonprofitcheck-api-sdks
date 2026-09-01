@@ -21,9 +21,6 @@ export interface Pub78Source {
   state?: string | null;
   indicator?: string | null;
   church_message?: string | null;
-  source_org_type_1?: string | null;
-  source_org_type_2?: string | null;
-  source_org_type_3?: string | null;
   organization_types?: (OrganizationType | null)[] | null;
   most_recent?: string | null;
 }
@@ -33,9 +30,6 @@ export interface BmfSource {
   status?: boolean | null;
   organization_name?: string | null;
   ein?: string | null;
-  city?: string | null;
-  state?: string | null;
-  street_address?: string | null;
   church_message?: string | null;
   subsection?: string | null;
   subsection_description?: string | null;
@@ -49,8 +43,6 @@ export interface BmfSource {
   group_exemption?: string | null;
   exempt_status_code?: string | null;
   filing_req_code?: string | null;
-  pf_filing_req_cd?: string | null;
-  deductability_text?: string | null;
   most_recent?: string | null;
 }
 
@@ -59,7 +51,6 @@ export interface AroeSource {
   revocation_code?: string | null;
   revocation_date?: string | null;
   reinstatement_date?: string | null;
-  list_published_date?: string | null;
 }
 
 /** OFAC Specially Designated Nationals findings. */
@@ -70,7 +61,6 @@ export interface OfacSource {
    * invent one by matching on the wording.
    */
   status?: string | null;
-  list_published_date?: string | null;
 }
 
 /** Publication 78 findings, or `null` if the API returned none. */
@@ -83,9 +73,6 @@ export function getPub78(nonprofit: Nonprofit): Pub78Source | null {
     state: 'pub78_state',
     indicator: 'pub78_indicator',
     church_message: 'pub78_church_message',
-    source_org_type_1: 'pub78_source_org_type_1',
-    source_org_type_2: 'pub78_source_org_type_2',
-    source_org_type_3: 'pub78_source_org_type_3',
     organization_types: 'organization_types',
     most_recent: 'most_recent_pub78',
   });
@@ -97,9 +84,6 @@ export function getBmf(nonprofit: Nonprofit): BmfSource | null {
     status: 'bmf_status',
     organization_name: 'bmf_organization_name',
     ein: 'bmf_ein',
-    city: 'bmf_city',
-    state: 'bmf_state',
-    street_address: 'bmf_street_address',
     church_message: 'bmf_church_message',
     subsection: 'bmf_subsection',
     subsection_description: 'subsection_description',
@@ -113,8 +97,6 @@ export function getBmf(nonprofit: Nonprofit): BmfSource | null {
     group_exemption: 'group_exemption',
     exempt_status_code: 'exempt_status_code',
     filing_req_code: 'filing_req_code',
-    pf_filing_req_cd: 'bmf_source_pf_filing_req_cd',
-    deductability_text: 'bmf_deductability_text',
     most_recent: 'most_recent_bmf',
   });
 }
@@ -125,7 +107,6 @@ export function getAroe(nonprofit: Nonprofit): AroeSource | null {
     revocation_code: 'revocation_code',
     revocation_date: 'revocation_date',
     reinstatement_date: 'reinstatement_date',
-    list_published_date: 'aroe_list_published_date',
   });
 }
 
@@ -133,7 +114,6 @@ export function getAroe(nonprofit: Nonprofit): AroeSource | null {
 export function getOfac(nonprofit: Nonprofit): OfacSource | null {
   return project<OfacSource>(nonprofit, {
     status: 'ofac_status',
-    list_published_date: 'ofac_list_published_date',
   });
 }
 

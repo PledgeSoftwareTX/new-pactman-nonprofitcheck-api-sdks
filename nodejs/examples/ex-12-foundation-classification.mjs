@@ -14,7 +14,7 @@
 import { getBmf, getPub78 } from '@pactmandev/nonprofit-check-plus';
 import { FIXTURE_EINS, withFixtureApi } from './lib/fixture-api.mjs';
 import { field, heading, note } from './lib/print.mjs';
-import { describeDeductibilityStatus, describePfFilingRequirement } from './lib/irs-codes.mjs';
+import { describeDeductibilityStatus } from './lib/irs-codes.mjs';
 
 /** What a grant officer sees. Every value is copied, none is computed. */
 function classificationPanel(nonprofit) {
@@ -29,9 +29,9 @@ function classificationPanel(nonprofit) {
     'foundation type code': bmf?.foundation_type_code,
     'foundation type description': bmf?.foundation_type_description,
     '509(a) status': bmf?.foundation_509a_status,
-    'deductibility text': bmf?.deductability_text,
-    '990-PF filing requirement': describePfFilingRequirement(bmf?.pf_filing_req_cd).display,
-    'Pub 78 org type 1': describeDeductibilityStatus(pub78?.source_org_type_1).display,
+    'Pub 78 deductibility': describeDeductibilityStatus(
+      pub78?.organization_types?.[0]?.deductibility_status_description,
+    ).display,
   };
 }
 
@@ -66,8 +66,7 @@ await withFixtureApi(async client => {
     // A DAF's own rules live here, and they are visibly the DAF's. A private
     // foundation grantee is not disqualified — it is routed differently, because
     // expenditure responsibility and the deductibility limit both change.
-    const isPrivateFoundation =
-      getBmf(nonprofit)?.foundation_type_code === 'pf' || getBmf(nonprofit)?.pf_filing_req_cd === '1';
+    const isPrivateFoundation = getBmf(nonprofit)?.foundation_type_code === 'pf';
 
     field(
       '\nthis application routes to',

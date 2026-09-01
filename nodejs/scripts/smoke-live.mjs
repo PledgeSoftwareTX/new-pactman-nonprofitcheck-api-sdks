@@ -1503,9 +1503,6 @@ function sourceChecks() {
         state: 'pub78_state',
         indicator: 'pub78_indicator',
         church_message: 'pub78_church_message',
-        source_org_type_1: 'pub78_source_org_type_1',
-        source_org_type_2: 'pub78_source_org_type_2',
-        source_org_type_3: 'pub78_source_org_type_3',
         organization_types: 'organization_types',
         most_recent: 'most_recent_pub78',
       },
@@ -1529,9 +1526,6 @@ function sourceChecks() {
         status: 'bmf_status',
         organization_name: 'bmf_organization_name',
         ein: 'bmf_ein',
-        city: 'bmf_city',
-        state: 'bmf_state',
-        street_address: 'bmf_street_address',
         church_message: 'bmf_church_message',
         subsection: 'bmf_subsection',
         subsection_description: 'subsection_description',
@@ -1545,8 +1539,6 @@ function sourceChecks() {
         group_exemption: 'group_exemption',
         exempt_status_code: 'exempt_status_code',
         filing_req_code: 'filing_req_code',
-        pf_filing_req_cd: 'bmf_source_pf_filing_req_cd',
-        deductability_text: 'bmf_deductability_text',
         most_recent: 'most_recent_bmf',
       },
       describe(bmf) {
@@ -1569,7 +1561,6 @@ function sourceChecks() {
         revocation_code: 'revocation_code',
         revocation_date: 'revocation_date',
         reinstatement_date: 'reinstatement_date',
-        list_published_date: 'aroe_list_published_date',
       },
       describe(aroe) {
         if (!aroe.revocation_date && !aroe.revocation_code) {
@@ -1593,7 +1584,6 @@ function sourceChecks() {
       get: getOfac,
       mapping: {
         status: 'ofac_status',
-        list_published_date: 'ofac_list_published_date',
       },
       describe(ofac) {
         // The API reports a sentence. If it ever becomes a boolean, a caller who
@@ -1688,7 +1678,6 @@ function sourceChecks() {
         'filing_req_code',
         'exempt_status_code',
         'group_exemption',
-        'bmf_source_pf_filing_req_cd',
         'ruling_month',
         'ruling_year',
       ];
@@ -1730,8 +1719,6 @@ function sourceChecks() {
         'organization_info_last_modified',
         'most_recent_bmf',
         'most_recent_pub78',
-        'ofac_list_published_date',
-        'aroe_list_published_date',
         'revocation_date',
         'reinstatement_date',
       ];

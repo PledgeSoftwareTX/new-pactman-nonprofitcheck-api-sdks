@@ -632,15 +632,14 @@ if (bmf === null) {
 } else {
   bmf.status; // one source's answer to one question — there is no isExempt here
   bmf.exempt_status_code;
-  bmf.deductability_text;
   bmf.most_recent;
 
-  bmf.organization_name, bmf.ein, bmf.street_address, bmf.city, bmf.state, bmf.church_message;
+  bmf.organization_name, bmf.ein, bmf.church_message;
   bmf.subsection, bmf.subsection_description;
   bmf.ruling_month, bmf.ruling_year, bmf.group_exemption;
   bmf.foundation_code, bmf.foundation_code_description;
   bmf.foundation_type_code, bmf.foundation_type_description, bmf.foundation_509a_status;
-  bmf.filing_req_code, bmf.pf_filing_req_cd;
+  bmf.filing_req_code;
 }
 
 // Reading the BMF in isolation is how a revoked or sanctioned organization
@@ -660,7 +659,6 @@ pub78?.verified; // true | false | null
 pub78?.indicator;
 pub78?.church_message;
 pub78?.most_recent;
-pub78?.source_org_type_1; // …_2, …_3
 
 // An entry can itself be null, so read through it rather than into it.
 for (const entry of pub78?.organization_types ?? []) {
@@ -705,7 +703,6 @@ const auditRecord = {
     revocation_code: nonprofit.revocation_code,
     revocation_date: nonprofit.revocation_date,
     reinstatement_date: nonprofit.reinstatement_date,
-    aroe_list_published_date: nonprofit.aroe_list_published_date,
     bmf_status: nonprofit.bmf_status, // revocation shows up in the other sources too
     pub78_verified: nonprofit.pub78_verified,
   },
@@ -818,13 +815,12 @@ const classificationPanel = {
   foundationCode: bmf?.foundation_code_description,
   foundationType: bmf?.foundation_type_description,
   status509a: bmf?.foundation_509a_status,
-  deductibility: bmf?.deductability_text,
   entries: pub78?.organization_types,
 };
 
 // A private foundation grantee is not disqualified — it is routed differently,
 // because expenditure responsibility and the deductibility limit both change.
-const isPrivateFoundation = bmf?.foundation_type_code === 'pf' || bmf?.pf_filing_req_cd === '1';
+const isPrivateFoundation = bmf?.foundation_type_code === 'pf';
 ```
 
 #### EX-13 — Filing and exemption metadata
@@ -872,8 +868,6 @@ const timestamps = {
   report_date: nonprofit.report_date, // when this response was generated
   most_recent_bmf: nonprofit.most_recent_bmf, // when each list was last refreshed
   most_recent_pub78: nonprofit.most_recent_pub78,
-  ofac_list_published_date: nonprofit.ofac_list_published_date,
-  aroe_list_published_date: nonprofit.aroe_list_published_date,
 };
 
 const ages = Object.entries(timestamps).map(([name, value]) => ({

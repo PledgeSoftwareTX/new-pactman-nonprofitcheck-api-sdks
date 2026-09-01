@@ -47,7 +47,6 @@ await withFixtureApi(async client => {
   field('revocation_code', aroe?.revocation_code);
   field('revocation_date', aroe?.revocation_date);
   field('reinstatement_date', aroe?.reinstatement_date);
-  field('aroe_list_published_date', aroe?.list_published_date);
 
   const revokedAt = parseApiDate(aroe?.revocation_date);
   const reinstatedAt = parseApiDate(aroe?.reinstatement_date);
@@ -98,7 +97,6 @@ await withFixtureApi(async client => {
         revocation_date: nonprofit.revocation_date,
         reinstatement_date: nonprofit.reinstatement_date,
         revocation_code: nonprofit.revocation_code,
-        aroe_list_published_date: nonprofit.aroe_list_published_date,
       },
       null,
       2,

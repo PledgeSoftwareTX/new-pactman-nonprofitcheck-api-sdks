@@ -31,24 +31,24 @@ function classifyOfac(nonprofit) {
   const ofac = getOfac(nonprofit);
 
   if (ofac === null) {
-    return { state: 'unavailable', status: undefined, publishedDate: undefined };
+    return { state: 'unavailable', status: undefined };
   }
 
-  const { status, list_published_date: publishedDate } = ofac;
+  const { status } = ofac;
 
   if (status === null || status === undefined) {
-    return { state: 'null', status, publishedDate };
+    return { state: 'null', status };
   }
 
   if (/UID:/i.test(status)) {
-    return { state: 'match', status, publishedDate };
+    return { state: 'match', status };
   }
 
   if (/NOT included/i.test(status)) {
-    return { state: 'no_match', status, publishedDate };
+    return { state: 'no_match', status };
   }
 
-  return { state: 'needs_review', status, publishedDate };
+  return { state: 'needs_review', status };
 }
 
 /** Four states, four destinations. None of them is "approve automatically". */
@@ -80,7 +80,6 @@ await withFixtureApi(async client => {
 
     heading(`${label} — ${nonprofit.organization_name}`);
     field('ofac_status', finding.status);
-    field('ofac_list_published_date', finding.publishedDate);
     field('getOfac() returned', getOfac(nonprofit) === null ? 'null (no OFAC fields)' : 'an object');
     field('state', finding.state);
     field('routed to', ROUTING[finding.state]);

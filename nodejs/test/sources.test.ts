@@ -33,13 +33,11 @@ describe('source projections', () => {
         revocation_code: '01',
         revocation_date: '3/06/2026 9:41:03 PM',
         reinstatement_date: '3/07/2026 9:41:03 PM',
-        aroe_list_published_date: '3/01/2026 12:00:00 AM',
       }),
     );
 
     expect(aroe?.revocation_code).toBe('01');
     expect(aroe?.reinstatement_date).toBe('3/07/2026 9:41:03 PM');
-    expect(aroe?.list_published_date).toBe('3/01/2026 12:00:00 AM');
   });
 
   it('maps OFAC fields verbatim, without deriving a boolean', () => {
@@ -62,9 +60,6 @@ describe('source projections', () => {
       pub78_state: null,
       pub78_indicator: null,
       pub78_church_message: null,
-      pub78_source_org_type_1: null,
-      pub78_source_org_type_2: null,
-      pub78_source_org_type_3: null,
       organization_types: null,
       most_recent_pub78: null,
     });

@@ -23,6 +23,15 @@ export interface OrganizationType {
  * Source-specific findings are flat on this object, prefixed by source
  * (`pub78_*`, `bmf_*`, `ofac_*`, and the revocation fields for the IRS
  * Automatic Revocation of Exemption list). See `sources.ts` for grouped views.
+ *
+ * Declared here is what the production API returns. Some deployments serve
+ * additional source fields — the BMF address (`bmf_city`, `bmf_state`,
+ * `bmf_street_address`), `bmf_source_pf_filing_req_cd`,
+ * `bmf_deductability_text`, `pub78_source_org_type_1..3`,
+ * `ofac_list_published_date` and `aroe_list_published_date`. They are not
+ * declared because production does not return them; when it does, they are
+ * readable through the index signature below and through `raw`, and this
+ * package will declare them in a release of its own.
  */
 export interface Nonprofit {
   /** Public Pactman profile URL for the organization. */
@@ -48,9 +57,6 @@ export interface Nonprofit {
   pub78_city?: string | null;
   pub78_state?: string | null;
   pub78_indicator?: string | null;
-  pub78_source_org_type_1?: string | null;
-  pub78_source_org_type_2?: string | null;
-  pub78_source_org_type_3?: string | null;
   organization_types?: (OrganizationType | null)[] | null;
   most_recent_pub78?: string | null;
 
@@ -59,12 +65,7 @@ export interface Nonprofit {
   bmf_organization_name?: string | null;
   bmf_ein?: string | null;
   bmf_status?: boolean | null;
-  bmf_city?: string | null;
-  bmf_state?: string | null;
-  bmf_street_address?: string | null;
   bmf_subsection?: string | null;
-  bmf_source_pf_filing_req_cd?: string | null;
-  bmf_deductability_text?: string | null;
   most_recent_bmf?: string | null;
   subsection_description?: string | null;
   foundation_code?: string | null;
@@ -84,13 +85,11 @@ export interface Nonprofit {
    * boolean. Read it, or present it to a reviewer.
    */
   ofac_status?: string | null;
-  ofac_list_published_date?: string | null;
 
   // IRS Automatic Revocation of Exemption
   revocation_code?: string | null;
   revocation_date?: string | null;
   reinstatement_date?: string | null;
-  aroe_list_published_date?: string | null;
 
   /** True when the IRS BMF and Publication 78 records disagree. */
   irs_bmf_pub78_conflict?: boolean | null;

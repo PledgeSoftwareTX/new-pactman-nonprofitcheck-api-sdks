@@ -532,7 +532,7 @@ export function coverageDiff(expected, observed, required = null) {
  * whatever `src/types.ts` declares without a `?`.
  *
  * Optionality is the promise the package actually makes. A field declared
- * `bmf_city?: string | null` says "this may not be here", so a response without
+ * `address_line2?: string | null` says "this may not be here", so a response without
  * it keeps the promise, and failing on its absence tests the deployment's
  * current data rather than the package's contract.
  */

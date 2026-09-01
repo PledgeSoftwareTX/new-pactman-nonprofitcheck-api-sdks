@@ -41,11 +41,6 @@ field('pub78_indicator', pub78.indicator);
 field('pub78_church_message', pub78.church_message);
 field('most_recent_pub78', pub78.most_recent);
 
-heading('Source organization types');
-field('pub78_source_org_type_1', describeDeductibilityStatus(pub78.source_org_type_1).display);
-field('pub78_source_org_type_2', describeDeductibilityStatus(pub78.source_org_type_2).display);
-field('pub78_source_org_type_3', describeDeductibilityStatus(pub78.source_org_type_3).display);
-
 heading('Deductibility entries');
 
 if (!pub78.organization_types || pub78.organization_types.length === 0) {

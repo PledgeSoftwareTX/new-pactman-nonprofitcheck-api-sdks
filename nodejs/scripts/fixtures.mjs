@@ -46,6 +46,8 @@ export const FIXTURE_EINS = {
   conflicted: '521693387',
   /** Carries fields and an enum value this SDK version does not know about. */
   futureFields: '237324370',
+  /** Production's shape plus the source fields only newer deployments return. */
+  pendingSourceFields: '046001341',
   /** Well-formed, but no record exists. */
   noRecord: '999999999',
 };
@@ -121,9 +123,6 @@ function publicCharity(ein, name, overrides = {}, omit = []) {
     pub78_city: 'Westfield',
     pub78_state: 'MA',
     pub78_indicator: '0',
-    pub78_source_org_type_1: 'PC',
-    pub78_source_org_type_2: null,
-    pub78_source_org_type_3: null,
     organization_types: [DEDUCTIBILITY_PUBLIC_CHARITY],
     most_recent_pub78: apiDate(26),
 
@@ -131,12 +130,7 @@ function publicCharity(ein, name, overrides = {}, omit = []) {
     bmf_organization_name: name.toUpperCase(),
     bmf_ein: ein,
     bmf_status: true,
-    bmf_city: 'WESTFIELD',
-    bmf_state: 'MA',
-    bmf_street_address: '50 LOWELL AVE APT 3B',
     bmf_subsection: '03',
-    bmf_source_pf_filing_req_cd: '0',
-    bmf_deductability_text: 'Contributions are deductible',
     most_recent_bmf: apiDate(20),
     subsection_description: '501(c)(3) Public Charity',
     foundation_code: '10',
@@ -150,12 +144,10 @@ function publicCharity(ein, name, overrides = {}, omit = []) {
     exempt_status_code: '01',
 
     ofac_status: OFAC_NO_MATCH,
-    ofac_list_published_date: apiDate(5),
 
     revocation_code: null,
     revocation_date: null,
     reinstatement_date: null,
-    aroe_list_published_date: apiDate(12),
 
     irs_bmf_pub78_conflict: false,
     report_date: apiDate(0),
@@ -191,7 +183,6 @@ export const FIXTURE_ORGANIZATIONS = {
       zip: '01103-1420',
       address_line1: '19 HAMPDEN ST',
       address_line2: null,
-      bmf_street_address: '19 HAMPDEN ST',
     },
   ),
 
@@ -200,13 +191,10 @@ export const FIXTURE_ORGANIZATIONS = {
     'Hartwell Family Example Foundation',
     {
       organization_name_aka: null,
-      // A private foundation files a 990-PF, tracked in the PF field below
-      // rather than in the general 990 filing requirement.
+      // A private foundation files a 990-PF, so it carries no general 990
+      // filing requirement.
       filing_req_code: '00',
-      pub78_source_org_type_1: 'PF',
       organization_types: [DEDUCTIBILITY_PRIVATE_FOUNDATION],
-      bmf_source_pf_filing_req_cd: '1',
-      bmf_deductability_text: 'Contributions are deductible',
       subsection_description: '501(c)(3) Private Foundation',
       foundation_code: '04',
       foundation_code_description: 'Private non-operating foundation',
@@ -233,16 +221,13 @@ export const FIXTURE_ORGANIZATIONS = {
       zip: null,
       pub78_city: null,
       pub78_state: null,
-      bmf_city: null,
-      bmf_state: null,
-      bmf_street_address: null,
       group_exemption: null,
       ruling_month: null,
       ruling_year: null,
     },
-    // No OFAC keys at all: the source was not reported for this organization,
+    // No OFAC key at all: the source was not reported for this organization,
     // which is not the same as a null status or a no-match result.
-    ['ofac_status', 'ofac_list_published_date'],
+    ['ofac_status'],
   ),
 
   // Every address component is present, and they contradict one another: the
@@ -262,9 +247,6 @@ export const FIXTURE_ORGANIZATIONS = {
       zip: '04856',
       pub78_city: 'Rockport',
       pub78_state: 'MA',
-      bmf_city: 'ROCKPORT',
-      bmf_state: 'MA',
-      bmf_street_address: '12 SEA STREET',
     },
   ),
 
@@ -277,8 +259,6 @@ export const FIXTURE_ORGANIZATIONS = {
       organization_info_last_modified: apiDate(700),
       most_recent_pub78: apiDate(640),
       most_recent_bmf: apiDate(610),
-      ofac_list_published_date: apiDate(580),
-      aroe_list_published_date: apiDate(560),
     },
   ),
 
@@ -291,7 +271,6 @@ export const FIXTURE_ORGANIZATIONS = {
       pub78_indicator: null,
       organization_types: null,
       bmf_status: false,
-      bmf_deductability_text: 'Contributions are not deductible',
       subsection_description: '501(c)(3) Public Charity',
       exempt_status_code: '25',
       revocation_code: '01',
@@ -326,7 +305,6 @@ export const FIXTURE_ORGANIZATIONS = {
     'Riverbend Example Coalition',
     {
       ofac_status: null,
-      ofac_list_published_date: null,
     },
   ),
 
@@ -372,6 +350,30 @@ export const FIXTURE_ORGANIZATIONS = {
         matches: 0,
         list_published_date: apiDate(5),
       },
+    },
+  ),
+
+  // A deployment running ahead of production. Every other fixture is the shape
+  // entities.pactman.org returns today; this one adds the ten source fields
+  // that are built but not yet released there. This package deliberately does
+  // not declare them (see `Nonprofit` in src/types.ts), so they exercise the
+  // path that keeps undeclared fields readable through `raw` and index access
+  // instead of dropping them.
+  [FIXTURE_EINS.pendingSourceFields]: publicCharity(
+    FIXTURE_EINS.pendingSourceFields,
+    'Ahead Of Production Example Fund',
+    {
+      organization_name_aka: null,
+      pub78_source_org_type_1: 'PC',
+      pub78_source_org_type_2: null,
+      pub78_source_org_type_3: null,
+      bmf_city: 'WESTFIELD',
+      bmf_state: 'MA',
+      bmf_street_address: '50 LOWELL AVE APT 3B',
+      bmf_source_pf_filing_req_cd: '0',
+      bmf_deductability_text: 'Contributions are deductible',
+      ofac_list_published_date: apiDate(5),
+      aroe_list_published_date: apiDate(12),
     },
   ),
 };

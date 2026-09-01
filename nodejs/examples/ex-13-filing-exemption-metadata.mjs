@@ -19,7 +19,6 @@ import { field, heading, note, render } from './lib/print.mjs';
 import {
   describeExemptStatus,
   describeFilingRequirement,
-  describePfFilingRequirement,
   formatRulingDate,
 } from './lib/irs-codes.mjs';
 
@@ -51,7 +50,6 @@ await withFixtureApi(async client => {
     heading(`${label} — ${nonprofit.organization_name}`);
 
     codeRow('filing_req_code', describeFilingRequirement(bmf?.filing_req_code));
-    codeRow('bmf_source_pf_filing_req_cd', describePfFilingRequirement(bmf?.pf_filing_req_cd));
     codeRow('exempt_status_code', describeExemptStatus(bmf?.exempt_status_code));
 
     // Codes the API already describes for you. Read the description it sends;

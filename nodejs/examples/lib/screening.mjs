@@ -43,8 +43,6 @@ export function oldestSourceAgeDays(nonprofit, now = new Date()) {
   const dates = [
     nonprofit.most_recent_bmf,
     nonprofit.most_recent_pub78,
-    nonprofit.ofac_list_published_date,
-    nonprofit.aroe_list_published_date,
     nonprofit.organization_info_last_modified,
   ]
     .map(parseApiDate)
