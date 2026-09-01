@@ -22,3 +22,11 @@ build/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# .NET
+bin/
+obj/
+artifacts/
+*.user
+.vs/
+TestResults/

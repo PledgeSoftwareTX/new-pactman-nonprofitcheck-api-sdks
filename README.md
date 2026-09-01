@@ -4,11 +4,12 @@ Official client libraries for the **Pactman Nonprofit Check Plus API**: look up 
 
 One directory per language, each published independently.
 
-| Language             | Package                             | Status    | Docs                                   |
-| -------------------- | ----------------------------------- | --------- | -------------------------------------- |
-| Node.js / TypeScript | `@pactmandev/nonprofit-check-plus`  | Available | [nodejs/README.md](./nodejs/README.md) |
-| Python               | `pactman-nonprofit-check-plus`      | Available | [python/README.md](./python/README.md) |
-| PHP                  | `pactmandev/nonprofit-check-plus`   | Available | [separate repository][php-sdk]          |
+| Language             | Package                            | Status    | Docs                                   |
+| -------------------- | ---------------------------------- | --------- | -------------------------------------- |
+| Node.js / TypeScript | `@pactmandev/nonprofit-check-plus` | Available | [nodejs/README.md](./nodejs/README.md) |
+| Python               | `pactman-nonprofit-check-plus`     | Available | [python/README.md](./python/README.md) |
+| .NET / C#            | `Pactman.NonprofitCheckPlus`       | Available | [dotnet/README.md](./dotnet/README.md) |
+| PHP                  | `pactmandev/nonprofit-check-plus`  | Available | [separate repository][php-sdk]         |
 
 [php-sdk]: https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-php-sdk
 
