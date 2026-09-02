@@ -403,7 +403,8 @@ class Runner:
         self.cycle_count_end: int | None = None
         self.single_result: Any = None
         self.bulk_result: Any = None
-        self.bulk_submitted: list[str] = []
+        # True once a bulk request has been refused for containing an EIN outside
+        # the key's allowlist, so a check that finds no bulk response can say why.
         self.free_tier_key = False
         self.observed_round_trip: float | None = None
 
@@ -436,11 +437,11 @@ class Runner:
             )
         )
 
-    def capture_bulk(self, result: Any, submitted: Sequence[str]) -> None:
+    def capture_bulk(self, result: Any) -> None:
         """
         Keeps the first successful bulk response for the checks that read one.
 
-        ``bulk partial success`` is the better subject — its envelope is the only
+        ``bulk with a miss`` is the better subject — its envelope is the only
         one carrying the item-level errors a batch with a miss returns — but it is
         unreachable on a key whose bulk EINs are allowlisted, since such a key
         refuses the whole batch. Capturing here rather than in that one check
@@ -449,7 +450,6 @@ class Runner:
         """
         if self.bulk_result is None:
             self.bulk_result = result
-            self.bulk_submitted = list(submitted)
 
     def observe_cycle_count(self, value: Any) -> None:
         """Tracks the cumulative counter across the whole run."""
@@ -649,7 +649,7 @@ def from_record(
         nonprofit = runner.single_result.nonprofit if runner.single_result else None
 
         if not nonprofit:
-            return Outcome(status="skip", detail="the single check returned no record")
+            return Outcome(status="fail", detail="the single check returned no record")
 
         return body(record_of(nonprofit), runner)
 
@@ -1366,7 +1366,7 @@ def single_check_checks(ein: str, api_key: str) -> list[Check]:
         result = runner.single_result
 
         if not result:
-            return Outcome(status="skip", detail="the single check did not return a record")
+            return Outcome(status="fail", detail="the single check did not return a record")
 
         envelope = envelope_of(result)
         envelope_keys = list(envelope)
@@ -1439,6 +1439,34 @@ def single_check_checks(ein: str, api_key: str) -> list[Check]:
                 + (f" · {len(mistyped)} numeric field(s) mistyped" if mistyped else "")
             ),
             data={"envelope_keys": envelope_keys},
+        )
+
+    def check_count_is_a_number(runner: Runner) -> Outcome:
+        result = runner.single_result
+
+        if not result:
+            return Outcome(status="fail", detail="the single check did not return a record")
+
+        envelope = envelope_of(result)
+
+        check_that(
+            "nonprofit_check_count" in envelope,
+            "the response did not carry nonprofit_check_count",
+        )
+
+        wire = envelope["nonprofit_check_count"]
+
+        # ``check_count`` is None both for a counter the API sent as null and for
+        # one it sent as "42", so the type is only readable off the envelope.
+        check_that(
+            isinstance(wire, (int, float)) and not isinstance(wire, bool),
+            f"nonprofit_check_count arrived as {type(wire).__name__} ({wire!r}), not a "
+            "number — it reads as None",
+        )
+
+        return Outcome(
+            detail=f"{wire} · a JSON number, so check_count reports it",
+            data={"check_count": wire},
         )
 
     def model_field_coverage(record: dict[str, Any], runner: Runner) -> Outcome:
@@ -1640,7 +1668,8 @@ def single_check_checks(ein: str, api_key: str) -> list[Check]:
     return [
         # The one fetch every record-derived check below reads.
         Check(("ex-03", "quickstart", "ex-26", "ex-27"), "single check", 1, single_check),
-        Check(("ex-03", "ex-21"), "envelope shape", 0, envelope_shape),
+        Check(("ex-03",), "envelope shape", 0, envelope_shape),
+        Check(("ex-21",), "check count is a number", 0, check_count_is_a_number),
         from_record(("ex-25", "ex-03"), "model field coverage", model_field_coverage),
         from_record(("ex-03",), "identity fields", identity_fields),
         from_record(("ex-04",), "name fields", name_fields),
@@ -1966,7 +1995,7 @@ def forward_compatibility_checks() -> list[Check]:
         result = runner.single_result
 
         if not result:
-            return Outcome(status="skip", detail="the single check did not return a record")
+            return Outcome(status="fail", detail="the single check did not return a record")
 
         envelope = envelope_of(result)
         data = envelope.get("data")
@@ -2028,14 +2057,14 @@ def forward_compatibility_checks() -> list[Check]:
     ]
 
 
-# --- checks: bulk (ex-17..ex-21) ---------------------------------------------
+# --- checks: bulk (ex-17..ex-20) ---------------------------------------------
 
 
 def bulk_checks(eins: Sequence[str]) -> list[Check]:
     bulk_eins = list(eins[:BULK_PROBE_LIMIT])
     duplicate_probe = [eins[1], eins[0], eins[1]] if len(eins) >= 2 else None
 
-    def bulk_partial_success(runner: Runner) -> Outcome:
+    def bulk_with_a_miss(runner: Runner) -> Outcome:
         submitted = [*bulk_eins, MISSING_EIN]
 
         try:
@@ -2044,25 +2073,45 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
             if not is_free_tier_restriction(error):
                 raise
 
-            # The batch was refused for containing an EIN outside the key's
-            # allowlist, so nothing was looked up and partial success was never
-            # exercised. Record the key class for the checks that depend on it.
+            # A key whose bulk EINs are allowlisted answers this batch by refusing
+            # it whole, before any lookup runs. That refusal is a contract in its
+            # own right and it is the one this request actually exercised, so hold
+            # it to that contract rather than reporting no result at all. Knowing
+            # which contract applies needs nothing declared up front: the response
+            # says which one it is. What goes unverified either way is ex-19's own
+            # claim, which needs a body carrying hits and misses together — the
+            # detail says so rather than letting a pass imply otherwise.
             runner.free_tier_key = True
-            runner.note(
-                "bulk partial success",
-                "this key restricts bulk requests to a fixed set of EINs, so a batch "
-                f"containing {MISSING_EIN} was refused whole — rerun with a key that has "
-                "open bulk access to verify partial success",
+
+            reasons = [str(detail.get("reason", "")) for detail in error.api_errors]
+
+            check_that(
+                error.status == 404,
+                f"the allowlist refusal returned HTTP {error.status}, expected 404",
+            )
+            check_that(
+                any(
+                    re.search(r"accessible nonprofits", reason, re.IGNORECASE)
+                    for reason in reasons
+                ),
+                f"no reason named the accessible-nonprofits restriction: {reasons}",
             )
 
             return Outcome(
-                status="skip",
-                detail="the key restricts bulk EINs to an allowlist — partial success is "
-                "unreachable",
+                detail=(
+                    f"a {len(submitted)}-EIN batch reaching outside the allowlist was refused "
+                    f"whole · 404 · request {error.request_id or 'no id'} · partial success "
+                    "needs a key with open bulk access"
+                ),
+                data={
+                    "contract": "allowlist-refusal",
+                    "reasons": reasons,
+                    "outside_allowlist": MISSING_EIN,
+                },
             )
 
         runner.observe_cycle_count(result.check_count)
-        runner.capture_bulk(result, submitted)
+        runner.capture_bulk(result)
 
         check_that(
             result.status == 200,
@@ -2072,7 +2121,7 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
 
         if normalize_ein(MISSING_EIN) not in result.not_found_eins:
             runner.note(
-                "bulk partial success",
+                "bulk with a miss",
                 "the missing EIN was not reported in errors[].eins; not_found_eins = "
                 f"{result.not_found_eins}",
             )
@@ -2088,7 +2137,7 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
 
         if unaccounted:
             runner.note(
-                "bulk partial success",
+                "bulk with a miss",
                 f"inputs with neither a record nor an error: {', '.join(unaccounted)}",
             )
 
@@ -2107,7 +2156,7 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
         result = runner.client.nonprofits.check_bulk(duplicate_probe)
 
         runner.observe_cycle_count(result.check_count)
-        runner.capture_bulk(result, duplicate_probe)
+        runner.capture_bulk(result)
 
         requested = [normalize_ein(value) for value in duplicate_probe]
         returned_eins = [str(record_of(org).get("ein")) for org in result.organizations]
@@ -2159,7 +2208,7 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
         bulk = runner.bulk_result
 
         if not single or bulk is None:
-            return Outcome(status="skip", detail="both a single and a bulk result are needed")
+            return Outcome(status="fail", detail="both a single and a bulk result are needed")
 
         twin = next(
             (
@@ -2172,7 +2221,7 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
 
         if twin is None:
             return Outcome(
-                status="skip", detail=f"{single.get('ein')} was not among the bulk results"
+                status="fail", detail=f"{single.get('ein')} was not among the bulk results"
             )
 
         check_that(
@@ -2212,52 +2261,8 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
             data={"only_single": only_single, "only_bulk": only_bulk},
         )
 
-    def bulk_usage_accounting(runner: Runner) -> Outcome:
-        single = runner.single_result
-        bulk = runner.bulk_result
-
-        if single is None or bulk is None:
-            return Outcome(status="skip", detail="both a single and a bulk result are needed")
-
-        if single.check_count is None or bulk.check_count is None:
-            return Outcome(
-                status="skip", detail="the API did not report nonprofit_check_count"
-            )
-
-        check_that(
-            bulk.check_count >= single.check_count,
-            f"the counter fell from {single.check_count} to {bulk.check_count} between a "
-            "single and a bulk call",
-        )
-
-        batch_size = len(runner.bulk_submitted)
-
-        # If it ever equals the batch size, someone is about to reconstruct usage
-        # from their own input and be wrong (ex-18, ex-21).
-        if bulk.check_count == batch_size:
-            runner.note(
-                "bulk usage accounting",
-                f"the bulk response reported {bulk.check_count}, exactly the batch size — "
-                "verify it is still a cycle total",
-            )
-
-            return Outcome(
-                status="warn",
-                detail=f"check_count {bulk.check_count} equals the {batch_size}-EIN batch size",
-            )
-
-        return Outcome(
-            detail=(
-                f"{single.check_count} → {bulk.check_count} across a {batch_size}-EIN batch · "
-                "a cycle total, not a batch size"
-            ),
-            data={"single": single.check_count, "bulk": bulk.check_count},
-        )
-
     checks = [
-        Check(
-            ("ex-19", "bulk"), "bulk partial success", len(bulk_eins) + 1, bulk_partial_success
-        )
+        Check(("ex-19", "bulk"), "bulk with a miss", len(bulk_eins) + 1, bulk_with_a_miss)
     ]
 
     if duplicate_probe is not None:
@@ -2271,7 +2276,6 @@ def bulk_checks(eins: Sequence[str]) -> list[Check]:
         )
 
     checks.append(Check(("ex-17",), "bulk and single agree", 0, bulk_and_single_agree))
-    checks.append(Check(("ex-21",), "bulk usage accounting", 0, bulk_usage_accounting))
 
     return checks
 
@@ -2395,7 +2399,7 @@ def contract_checks() -> list[Check]:
             current = observe(runner, kind)
 
             if "missing" in current:
-                return Outcome(status="skip", detail=str(current["missing"]))
+                return Outcome(status="fail", detail=str(current["missing"]))
 
             expected = compose_expected(load_contract(), kind)
             result = diff(
@@ -2437,7 +2441,7 @@ def contract_checks() -> list[Check]:
             current = observe(runner, kind)
 
             if "missing" in current:
-                return Outcome(status="skip", detail=str(current["missing"]))
+                return Outcome(status="fail", detail=str(current["missing"]))
 
             recording = load_baseline()
             before = recording.get(kind)
@@ -2533,7 +2537,7 @@ def recheck_checks(ein: str) -> list[Check]:
         first = runner.single_result
 
         if not first or not first.nonprofit:
-            return Outcome(status="skip", detail="the single check did not return a record")
+            return Outcome(status="fail", detail="the single check did not return a record")
 
         second = runner.client.nonprofits.check(ein)
 
@@ -2598,49 +2602,6 @@ def recheck_checks(ein: str) -> list[Check]:
             data={"appeared": appeared, "vanished": vanished, "changed": changed},
         )
 
-    def check_count_is_cumulative(runner: Runner) -> Outcome:
-        start, end = runner.cycle_count_start, runner.cycle_count_end
-
-        if start is None or end is None:
-            return Outcome(status="skip", detail="the API did not report nonprofit_check_count")
-
-        check_that(end >= start, f"the counter went backwards: {start} → {end}")
-
-        if end == start:
-            # A free key reports the size of each request rather than a running
-            # cycle total, so a flat counter is the documented behaviour for that
-            # key class and proves nothing about the cumulative contract.
-            if runner.free_tier_key:
-                runner.note(
-                    "check count is cumulative",
-                    "the counter reported the size of each request and never accumulated "
-                    f"({start} → {end}) — expected for a key with allowlisted EINs",
-                )
-
-                return Outcome(
-                    status="skip",
-                    detail="this key reports a per-request count — a cumulative total needs "
-                    "a metered key",
-                )
-
-            runner.note(
-                "check count is cumulative",
-                f"the counter did not move across {runner.checks_spent} billable checks "
-                f"({start} → {end})",
-            )
-
-            return Outcome(
-                status="warn", detail=f"unchanged at {start} — expected a cumulative total"
-            )
-
-        return Outcome(
-            detail=(
-                f"{start} → {end} (+{end - start}) across the run · a running billing-cycle "
-                "total, not a request size"
-            ),
-            data={"start": start, "end": end},
-        )
-
     return [
         Check(
             ("ex-29", "ex-28", "ex-30"),
@@ -2648,7 +2609,6 @@ def recheck_checks(ein: str) -> list[Check]:
             1,
             a_repeat_check_is_stable,
         ),
-        Check(("ex-21",), "check count is cumulative", 0, check_count_is_cumulative),
     ]
 
 
@@ -2662,7 +2622,7 @@ def wire_checks(api_key: str) -> list[Check]:
 
     def documented_endpoints_and_methods(runner: Runner) -> Outcome:
         if not runner.requests:
-            return Outcome(status="skip", detail="no requests were sent")
+            return Outcome(status="fail", detail="no requests were sent")
 
         singles = 0
         bulks = 0
@@ -2715,7 +2675,7 @@ def wire_checks(api_key: str) -> list[Check]:
 
     def credentials_stay_off_the_wire(runner: Runner) -> Outcome:
         if not runner.requests:
-            return Outcome(status="skip", detail="no requests were sent")
+            return Outcome(status="fail", detail="no requests were sent")
 
         user_agent_prefix = "pactman-nonprofit-check-plus/"
 

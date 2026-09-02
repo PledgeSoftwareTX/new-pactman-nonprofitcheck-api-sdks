@@ -415,6 +415,13 @@ class Runner {
     this.requestsSent = 0;
     this.cycleCountStart = null;
     this.cycleCountEnd = null;
+    /**
+     * True once a bulk request has been refused for containing an EIN outside
+     * the key's allowlist. Declared here rather than sprung into existence at
+     * the point of that refusal, so a check that finds no bulk response can
+     * say why there is none.
+     */
+    this.freeTierKey = false;
     /** One entry per outbound request, with the credential reduced to a flag. */
     this.requests = [];
   }
@@ -487,17 +494,16 @@ class Runner {
   /**
    * Keeps the first successful bulk response for the checks that read one.
    *
-   * `bulk partial success` is the better subject — its envelope is the only one
+   * `bulk with a miss` is the better subject — its envelope is the only one
    * carrying the item-level errors a batch with a miss returns — but it is
    * unreachable on a key whose bulk EINs are allowlisted, since such a key
    * refuses the whole batch. Capturing here rather than in that one check means
    * the duplicate probe's response stands in when it has to, instead of four
    * later checks skipping for want of any bulk response at all.
    */
-  captureBulk(result, submitted) {
+  captureBulk(result) {
     if (!this.bulkResult) {
       this.bulkResult = result;
-      this.bulkSubmitted = submitted;
     }
   }
 
@@ -598,7 +604,7 @@ function fromRecord(covers, name, body) {
       const nonprofit = runner.singleResult?.nonprofit;
 
       if (!nonprofit) {
-        return { status: 'skip', detail: 'the single check returned no record' };
+        return { status: 'fail', detail: 'the single check returned no record' };
       }
 
       return body(nonprofit, runner);
@@ -1217,14 +1223,14 @@ function singleCheckChecks(ein, apiKey) {
     },
 
     {
-      covers: ['ex-03', 'ex-21'],
+      covers: ['ex-03'],
       name: 'envelope shape',
       cost: 0,
       body(runner) {
         const result = runner.singleResult;
 
         if (!result) {
-          return { status: 'skip', detail: 'the single check did not return a record' };
+          return { status: 'fail', detail: 'the single check did not return a record' };
         }
 
         const envelopeKeys = Object.keys(result.raw);
@@ -1280,6 +1286,37 @@ function singleCheckChecks(ein, apiKey) {
             `${result.timeTakenMs ?? '?'}ms server-side` +
             (mistyped.length > 0 ? ` · ${mistyped.length} numeric field(s) mistyped` : ''),
           data: { envelopeKeys },
+        };
+      },
+    },
+
+    {
+      // The only check ex-21 claims: the counter arrives as a JSON number.
+      covers: ['ex-21'],
+      name: 'check count is a number',
+      cost: 0,
+      body(runner) {
+        const result = runner.singleResult;
+
+        if (!result) {
+          return { status: 'fail', detail: 'the single check did not return a record' };
+        }
+
+        const wire = result.raw.nonprofit_check_count;
+
+        assert(wire !== undefined, 'the response did not carry nonprofit_check_count');
+
+        // `checkCount` is null both for a counter the API sent as null and for
+        // one it sent as "42", so the type is only readable off the envelope.
+        assert(
+          typeof wire === 'number',
+          `nonprofit_check_count arrived as ${wire === null ? 'null' : typeof wire} ` +
+            `(${JSON.stringify(wire)}), not a number — it reads as null`,
+        );
+
+        return {
+          detail: `${wire} · a JSON number, so checkCount reports it`,
+          data: { checkCount: wire },
         };
       },
     },
@@ -1786,7 +1823,7 @@ function forwardCompatibilityChecks() {
         const result = runner.singleResult;
 
         if (!result) {
-          return { status: 'skip', detail: 'the single check did not return a record' };
+          return { status: 'fail', detail: 'the single check did not return a record' };
         }
 
         const data = result.raw.data;
@@ -1845,7 +1882,7 @@ function forwardCompatibilityChecks() {
   ];
 }
 
-// --- checks: bulk (ex-17..ex-21) --------------------------------------------
+// --- checks: bulk (ex-17..ex-20) --------------------------------------------
 
 function bulkChecks(eins) {
   const bulkEins = eins.slice(0, Math.min(eins.length, BULK_PROBE_LIMIT));
@@ -1854,7 +1891,7 @@ function bulkChecks(eins) {
 
   checks.push({
     covers: ['ex-19', 'bulk'],
-    name: 'bulk partial success',
+    name: 'bulk with a miss',
     cost: bulkEins.length + 1,
     async body(runner) {
       const submitted = [...bulkEins, MISSING_EIN];
@@ -1867,23 +1904,34 @@ function bulkChecks(eins) {
           throw error;
         }
 
-        // The batch was refused for containing an EIN outside the key's
-        // allowlist, so nothing was looked up and partial success was never
-        // exercised. Record the key class for the checks that depend on it.
+        // A key whose bulk EINs are allowlisted answers this batch by refusing
+        // it whole, before any lookup runs. That refusal is a contract in its
+        // own right and it is the one this request actually exercised, so hold
+        // it to that contract rather than reporting no result at all. Knowing
+        // which contract applies needs nothing declared up front: the response
+        // says which one it is. What goes unverified either way is ex-19's own
+        // claim, which needs a body carrying hits and misses together — the
+        // detail says so rather than letting a pass imply otherwise.
         runner.freeTierKey = true;
-        runner.note(
-          'bulk partial success',
-          `this key restricts bulk requests to a fixed set of EINs, so a batch containing ${MISSING_EIN} was refused whole — rerun with a key that has open bulk access to verify partial success`,
+
+        const reasons = (error.apiErrors ?? []).map(detail => String(detail?.reason ?? ''));
+
+        assert(error.status === 404, `the allowlist refusal returned HTTP ${error.status}, expected 404`);
+        assert(
+          reasons.some(reason => /accessible nonprofits/i.test(reason)),
+          `no reason named the accessible-nonprofits restriction: ${JSON.stringify(reasons)}`,
         );
 
         return {
-          status: 'skip',
-          detail: 'the key restricts bulk EINs to an allowlist — partial success is unreachable',
+          detail:
+            `a ${submitted.length}-EIN batch reaching outside the allowlist was refused whole · 404 · ` +
+            `request ${error.requestId ?? 'no id'} · partial success needs a key with open bulk access`,
+          data: { contract: 'allowlist-refusal', reasons, outsideAllowlist: MISSING_EIN },
         };
       }
 
       runner.observeCycleCount(result.checkCount);
-      runner.captureBulk(result, submitted);
+      runner.captureBulk(result);
 
       assert(
         result.status === 200,
@@ -1893,7 +1941,7 @@ function bulkChecks(eins) {
 
       if (!result.notFoundEins.includes(normalizeEin(MISSING_EIN))) {
         runner.note(
-          'bulk partial success',
+          'bulk with a miss',
           `the missing EIN was not reported in errors[].eins; notFoundEins = ${JSON.stringify(result.notFoundEins)}`,
         );
       }
@@ -1907,7 +1955,7 @@ function bulkChecks(eins) {
 
       if (unaccounted.length > 0) {
         runner.note(
-          'bulk partial success',
+          'bulk with a miss',
           `inputs with neither a record nor an error: ${unaccounted.join(', ')}`,
         );
       }
@@ -1930,7 +1978,7 @@ function bulkChecks(eins) {
         const result = await runner.client.nonprofits.checkBulk(duplicateProbe);
 
         runner.observeCycleCount(result.checkCount);
-        runner.captureBulk(result, duplicateProbe);
+        runner.captureBulk(result);
 
         const requested = duplicateProbe.map(value => normalizeEin(value));
         const returnedEins = result.organizations.map(org => org.ein);
@@ -1985,13 +2033,13 @@ function bulkChecks(eins) {
       const bulk = runner.bulkResult;
 
       if (!single || !bulk) {
-        return { status: 'skip', detail: 'both a single and a bulk result are needed' };
+        return { status: 'fail', detail: 'both a single and a bulk result are needed' };
       }
 
       const twin = bulk.organizations.find(org => org.ein === single.ein);
 
       if (!twin) {
-        return { status: 'skip', detail: `${single.ein} was not among the bulk results` };
+        return { status: 'fail', detail: `${single.ein} was not among the bulk results` };
       }
 
       assert(
@@ -2022,47 +2070,6 @@ function bulkChecks(eins) {
             ? `identical field sets for ${single.ein} on both endpoints`
             : `${onlySingle.length} field(s) only in single · ${onlyBulk.length} only in bulk`,
         data: { onlySingle, onlyBulk },
-      };
-    },
-  });
-
-  checks.push({
-    covers: ['ex-21'],
-    name: 'bulk usage accounting',
-    cost: 0,
-    body(runner) {
-      const single = runner.singleResult;
-      const bulk = runner.bulkResult;
-
-      if (!single || !bulk) {
-        return { status: 'skip', detail: 'both a single and a bulk result are needed' };
-      }
-
-      if (single.checkCount === null || bulk.checkCount === null) {
-        return { status: 'skip', detail: 'the API did not report nonprofit_check_count' };
-      }
-
-      assert(
-        bulk.checkCount >= single.checkCount,
-        `the counter fell from ${single.checkCount} to ${bulk.checkCount} between a single and a bulk call`,
-      );
-
-      const batchSize = runner.bulkSubmitted?.length ?? 0;
-
-      // If it ever equals the batch size, someone is about to reconstruct usage
-      // from their own input and be wrong (ex-18, ex-21).
-      if (bulk.checkCount === batchSize) {
-        runner.note(
-          'bulk usage accounting',
-          `the bulk response reported ${bulk.checkCount}, exactly the batch size — verify it is still a cycle total`,
-        );
-
-        return { status: 'warn', detail: `checkCount ${bulk.checkCount} equals the ${batchSize}-EIN batch size` };
-      }
-
-      return {
-        detail: `${single.checkCount} → ${bulk.checkCount} across a ${batchSize}-EIN batch · a cycle total, not a batch size`,
-        data: { single: single.checkCount, bulk: bulk.checkCount, batchSize },
       };
     },
   });
@@ -2191,7 +2198,7 @@ function contractChecks() {
         const current = observe(runner, kind);
 
         if (current.missing) {
-          return { status: 'skip', detail: current.missing };
+          return { status: 'fail', detail: current.missing };
         }
 
         const expected = composeExpected(loadContract(), kind);
@@ -2233,7 +2240,7 @@ function contractChecks() {
         const current = observe(runner, kind);
 
         if (current.missing) {
-          return { status: 'skip', detail: current.missing };
+          return { status: 'fail', detail: current.missing };
         }
 
         const recording = loadBaseline();
@@ -2320,7 +2327,7 @@ function recheckChecks(ein) {
         const first = runner.singleResult;
 
         if (!first?.nonprofit) {
-          return { status: 'skip', detail: 'the single check did not return a record' };
+          return { status: 'fail', detail: 'the single check did not return a record' };
         }
 
         const second = await runner.client.nonprofits.check(ein);
@@ -2377,50 +2384,6 @@ function recheckChecks(ein) {
         };
       },
     },
-
-    {
-      covers: ['ex-21'],
-      name: 'check count is cumulative',
-      cost: 0,
-      body(runner) {
-        const { cycleCountStart: start, cycleCountEnd: end } = runner;
-
-        if (start === null || end === null) {
-          return { status: 'skip', detail: 'the API did not report nonprofit_check_count' };
-        }
-
-        assert(end >= start, `the counter went backwards: ${start} → ${end}`);
-
-        if (end === start) {
-          // A free key reports the size of each request rather than a running
-          // cycle total, so a flat counter is the documented behaviour for that
-          // key class and proves nothing about the cumulative contract.
-          if (runner.freeTierKey) {
-            runner.note(
-              'check count is cumulative',
-              `the counter reported the size of each request and never accumulated (${start} → ${end}) — expected for a key with allowlisted EINs`,
-            );
-
-            return {
-              status: 'skip',
-              detail: 'this key reports a per-request count — a cumulative total needs a metered key',
-            };
-          }
-
-          runner.note(
-            'check count is cumulative',
-            `the counter did not move across ${runner.checksSpent} billable checks (${start} → ${end})`,
-          );
-
-          return { status: 'warn', detail: `unchanged at ${start} — expected a cumulative total` };
-        }
-
-        return {
-          detail: `${start} → ${end} (+${end - start}) across the run · a running billing-cycle total, not a request size`,
-          data: { start, end },
-        };
-      },
-    },
   ];
 }
 
@@ -2438,7 +2401,7 @@ function wireChecks(apiKey) {
       cost: 0,
       body(runner) {
         if (runner.requests.length === 0) {
-          return { status: 'skip', detail: 'no requests were sent' };
+          return { status: 'fail', detail: 'no requests were sent' };
         }
 
         let singles = 0;
@@ -2488,7 +2451,7 @@ function wireChecks(apiKey) {
       cost: 0,
       body(runner) {
         if (runner.requests.length === 0) {
-          return { status: 'skip', detail: 'no requests were sent' };
+          return { status: 'fail', detail: 'no requests were sent' };
         }
 
         const userAgentPrefix = 'pactmandev-nonprofit-check-plus/';
