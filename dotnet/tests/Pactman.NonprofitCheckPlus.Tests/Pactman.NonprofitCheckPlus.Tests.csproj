@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Pactman.NonprofitCheckPlus.Tests</RootNamespace>
+    <AssemblyName>Pactman.NonprofitCheckPlus.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Pactman.NonprofitCheckPlus/Pactman.NonprofitCheckPlus.csproj" />
+    <ProjectReference Include="../../scripts/Pactman.NonprofitCheckPlus.Dev/Pactman.NonprofitCheckPlus.Dev.csproj" />
+  </ItemGroup>
+
+  <!--
+    The contract and the recorded baseline are read straight from the source tree
+    rather than from the library's embedded copies, so a test that disagrees with
+    the shipped file fails instead of quietly comparing the file to itself.
+  -->
+  <ItemGroup>
+    <None Include="../../src/Pactman.NonprofitCheckPlus/response-contract.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/Pactman.NonprofitCheckPlus/response-baseline.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Directory.Build.props" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

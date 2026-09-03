@@ -1,0 +1,82 @@
+name: dotnet-sdk
+
+on:
+  push:
+    branches: [master]
+    paths: ['dotnet/**', '.github/workflows/dotnet-ci.yml']
+  pull_request:
+    paths: ['dotnet/**', '.github/workflows/dotnet-ci.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: dotnet
+
+jobs:
+  verify:
+    # The package targets netstandard2.0 as well as net8.0, so it is built on
+    # Windows too — that leg is what .NET Framework consumers actually load, and
+    # a Linux-only build would never exercise it.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+          cache: true
+          cache-dependency-path: dotnet/**/*.csproj
+
+      - name: Restore
+        run: dotnet restore
+
+      # Warnings are errors in Directory.Build.props, so this is the lint pass
+      # and the missing-XML-doc pass as well as the compile.
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Unit tests
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+      - name: Run the documented examples against a mock server
+        run: dotnet run --project scripts/Pactman.NonprofitCheckPlus.Tools --configuration Release --no-build -- examples-smoke
+
+      - name: Verify formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet format --verify-no-changes --no-restore
+
+  pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+          cache: true
+          cache-dependency-path: dotnet/**/*.csproj
+
+      - name: Pack
+        run: dotnet pack src/Pactman.NonprofitCheckPlus/Pactman.NonprofitCheckPlus.csproj --configuration Release -o artifacts
+
+      # A package that restores cleanly into a fresh project is the only proof
+      # that the lib/ layout and dependency groups are right.
+      - name: Install the package into a throwaway project
+        run: |
+          dotnet new console -o /tmp/consumer
+          dotnet nuget add source "$PWD/artifacts" --name local
+          dotnet add /tmp/consumer package Pactman.NonprofitCheckPlus --version 1.0.0 --source "$PWD/artifacts"
+          dotnet build /tmp/consumer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: dotnet/artifacts/*.nupkg

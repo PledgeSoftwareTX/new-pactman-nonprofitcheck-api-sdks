@@ -1,0 +1,24 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DebugType>portable</DebugType>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    The SDK version lives here so the library, the package manifest and the
+    User-Agent all read the same number. SdkVersion.Version is held against it
+    by a unit test rather than a build step, so the value is a compile-time
+    constant instead of a runtime metadata lookup.
+  -->
+  <PropertyGroup>
+    <PactmanSdkVersion>1.0.0</PactmanSdkVersion>
+  </PropertyGroup>
+
+</Project>

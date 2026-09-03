@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+    <RootNamespace>Pactman.NonprofitCheckPlus</RootNamespace>
+    <AssemblyName>Pactman.NonprofitCheckPlus</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Pactman.NonprofitCheckPlus</PackageId>
+    <Version>$(PactmanSdkVersion)</Version>
+    <Authors>Pactman</Authors>
+    <Company>Pactman</Company>
+    <Product>Pactman Nonprofit Check Plus</Product>
+    <Description>Official .NET SDK for the Pactman Nonprofit Check Plus API — verify US nonprofits by EIN against IRS BMF, Publication 78, Automatic Revocation and OFAC data.</Description>
+    <PackageTags>pactman;nonprofit;charity;ein;irs;pub78;bmf;ofac;compliance;sdk</PackageTags>
+    <PackageProjectUrl>https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/tree/master/dotnet#readme</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <!--
+    The response contract and the recorded baseline ship inside the assembly so
+    the contract tests and the live smoke tool read exactly what the package
+    promises, without depending on a path relative to the build output.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="response-contract.json" />
+    <EmbeddedResource Include="response-baseline.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pactman.NonprofitCheckPlus.Tests" />
+  </ItemGroup>
+
+  <!--
+    netstandard2.0 reaches .NET Framework 4.6.2+ and the older runtimes this
+    API's consumers are often pinned to. It predates System.Text.Json, so that
+    arrives as an explicit reference.
+  -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+</Project>

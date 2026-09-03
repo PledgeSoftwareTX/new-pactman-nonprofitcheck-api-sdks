@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Development-only support: the fixture API, the fixture records, and the
+    response-signature engine the smoke and baseline tools share. Never packed,
+    never shipped.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Pactman.NonprofitCheckPlus.Dev</RootNamespace>
+    <AssemblyName>Pactman.NonprofitCheckPlus.Dev</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Pactman.NonprofitCheckPlus/Pactman.NonprofitCheckPlus.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,73 @@
+name: publish-dotnet
+
+# Publishes dotnet/ to NuGet when a tag like `dotnet-v1.0.0` is pushed.
+# The tag prefix keeps this from firing for SDKs in other languages.
+
+on:
+  push:
+    tags: ['dotnet-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: dotnet
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: create an environment of this name in repo settings to require
+    # a manual approval before anything reaches NuGet. Delete if not wanted.
+    environment: nuget-publish
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # SourceLink stamps the commit into the symbols, which needs real history.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Fail if the tag and Directory.Build.props disagree
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#dotnet-v}"
+          PKG_VERSION="$(sed -n 's:.*<PactmanSdkVersion>\(.*\)</PactmanSdkVersion>.*:\1:p' Directory.Build.props)"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag says $TAG_VERSION but Directory.Build.props says $PKG_VERSION."
+            exit 1
+          fi
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Unit tests
+        run: dotnet test --configuration Release --no-build
+
+      - name: Run the documented examples against a mock server
+        run: dotnet run --project scripts/Pactman.NonprofitCheckPlus.Tools --configuration Release --no-build -- examples-smoke
+
+      - name: Pack
+        run: dotnet pack src/Pactman.NonprofitCheckPlus/Pactman.NonprofitCheckPlus.csproj --configuration Release --no-build -o artifacts
+
+      # Set NUGET_API_KEY in repo secrets. --skip-duplicate makes a re-run of a
+      # published version a no-op rather than a hard failure.
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "No NuGet API key set; nothing was published."
+            exit 1
+          fi
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

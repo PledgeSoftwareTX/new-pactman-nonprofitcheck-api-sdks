@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The development commands: the fixture server, the examples smoke runner, the
+    live smoke check and the baseline recorder. Never packed, never shipped.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Pactman.NonprofitCheckPlus.Tools</RootNamespace>
+    <AssemblyName>Pactman.NonprofitCheckPlus.Tools</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Pactman.NonprofitCheckPlus/Pactman.NonprofitCheckPlus.csproj" />
+    <ProjectReference Include="../Pactman.NonprofitCheckPlus.Dev/Pactman.NonprofitCheckPlus.Dev.csproj" />
+    <ProjectReference Include="../../examples/Pactman.NonprofitCheckPlus.Examples/Pactman.NonprofitCheckPlus.Examples.csproj" />
+  </ItemGroup>
+
+</Project>
