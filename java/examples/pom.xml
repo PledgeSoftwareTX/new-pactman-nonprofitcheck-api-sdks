@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.pactman</groupId>
+    <artifactId>pactman-nonprofit-check-plus-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>pactman-nonprofit-check-plus-examples</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Pactman Nonprofit Check Plus (examples)</name>
+  <description>Runnable examples for the Pactman Nonprofit Check Plus Java SDK. Not published.</description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <maven.install.skip>true</maven.install.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.pactman</groupId>
+      <artifactId>pactman-nonprofit-check-plus</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!--
+      The fixtures and the stand-in API live in devtools so that the examples,
+      the mock server and the live-drift checks all read one set of records.
+    -->
+    <dependency>
+      <groupId>org.pactman</groupId>
+      <artifactId>pactman-nonprofit-check-plus-devtools</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+        <configuration>
+          <mainClass>org.pactman.nonprofitcheckplus.examples.Main</mainClass>
+        </configuration>
+        <executions>
+          <!--
+            Every example, against the bundled fixture API, as part of an
+            ordinary build. No key and no network: an example that stops
+            demonstrating what it claims to fails the build here rather than
+            going stale unnoticed in a directory nobody runs.
+          -->
+          <execution>
+            <id>examples-smoke</id>
+            <phase>verify</phase>
+            <goals><goal>java</goal></goals>
+            <configuration>
+              <arguments>
+                <argument>--smoke</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.pactman</groupId>
+  <artifactId>pactman-nonprofit-check-plus-parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+
+  <name>Pactman Nonprofit Check Plus (parent)</name>
+  <description>Build aggregator for the Pactman Nonprofit Check Plus Java SDK and its examples.</description>
+  <url>https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/tree/master/java#readme</url>
+
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Pactman</name>
+      <organization>Pactman</organization>
+      <organizationUrl>https://pactman.org</organizationUrl>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git</connection>
+    <developerConnection>scm:git:git@github.com:PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git</developerConnection>
+    <url>https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks</url>
+  </scm>
+
+  <modules>
+    <module>sdk</module>
+    <module>devtools</module>
+    <module>examples</module>
+  </modules>
+
+  <properties>
+    <!--
+      Java 11 is the floor because the SDK is built on java.net.http.HttpClient,
+      which arrived in 11. It also keeps the artifact loadable by the long-lived
+      enterprise applications this API's consumers tend to run.
+    -->
+    <maven.compiler.release>11</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <junit.version>5.10.2</junit.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <!--
+              Warnings are errors here for the same reason they are in the .NET
+              build: a missing Javadoc or a raw type is a documentation defect,
+              and this package is read as much as it is run.
+            -->
+            <compilerArgs>
+              <!--
+                Named rather than `all`: the lint set javac accepts changes
+                between JDK releases, and `-Werror` over a moving set would make
+                the build fail on a newer JDK for a warning that did not exist
+                when the code was written. Every key here is stable on 11+.
+              -->
+              <arg>-Xlint:cast,deprecation,dep-ann,divzero,empty,fallthrough,finally,options,overrides,rawtypes,static,try,unchecked,varargs</arg>
+              <arg>-Werror</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.2.5</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-source-plugin</artifactId>
+          <version>3.3.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <version>3.6.3</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-gpg-plugin</artifactId>
+          <version>3.2.4</version>
+        </plugin>
+        <plugin>
+          <groupId>org.sonatype.central</groupId>
+          <artifactId>central-publishing-maven-plugin</artifactId>
+          <version>0.5.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+</project>

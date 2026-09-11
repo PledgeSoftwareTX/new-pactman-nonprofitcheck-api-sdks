@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.pactman</groupId>
+    <artifactId>pactman-nonprofit-check-plus-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>pactman-nonprofit-check-plus-devtools</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Pactman Nonprofit Check Plus (dev tools)</name>
+  <description>Fixtures, a stand-in API, and the response-drift checks the SDK is verified with. Not published.</description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <maven.install.skip>true</maven.install.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.pactman</groupId>
+      <artifactId>pactman-nonprofit-check-plus</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+        <configuration>
+          <mainClass>org.pactman.nonprofitcheckplus.devtools.Tools</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

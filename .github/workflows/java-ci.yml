@@ -1,0 +1,110 @@
+name: java-sdk
+
+on:
+  push:
+    branches: [master]
+    paths: ['java/**', '.github/workflows/java-ci.yml']
+  pull_request:
+    paths: ['java/**', '.github/workflows/java-ci.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: java
+
+jobs:
+  verify:
+    # The artifact targets Java 11, so it is compiled and tested on the oldest
+    # runtime it claims to support as well as the current LTS — a jar that only
+    # ever ran on 21 has not been shown to load on 11.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['11', '17', '21']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      # Warnings are errors in the parent POM, so this is the lint pass as well
+      # as the compile. `verify` also runs every documented example against the
+      # bundled fixture API, so a stale example fails the build.
+      - name: Build, test and run the examples
+        run: mvn -B --no-transfer-progress verify
+
+  javadoc:
+    # Javadoc runs its own doclint, which catches a missing @param or a broken
+    # link that the compiler is happy to ignore.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Javadoc
+        run: mvn -B --no-transfer-progress -pl sdk javadoc:javadoc
+
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Package
+        run: mvn -B --no-transfer-progress -DskipTests package
+
+      # A jar that resolves cleanly into a fresh project is the only proof that
+      # the coordinates and the (empty) dependency set are right.
+      - name: Install into the local repository and build a throwaway consumer
+        run: |
+          mvn -B -q --no-transfer-progress -DskipTests -pl sdk install
+          mkdir -p /tmp/consumer/src/main/java
+          cat > /tmp/consumer/pom.xml <<'POM'
+          <project xmlns="http://maven.apache.org/POM/4.0.0">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>test</groupId>
+            <artifactId>consumer</artifactId>
+            <version>1.0.0</version>
+            <properties><maven.compiler.release>11</maven.compiler.release></properties>
+            <dependencies>
+              <dependency>
+                <groupId>org.pactman</groupId>
+                <artifactId>pactman-nonprofit-check-plus</artifactId>
+                <version>1.0.0</version>
+              </dependency>
+            </dependencies>
+          </project>
+          POM
+          cat > /tmp/consumer/src/main/java/Consumer.java <<'JAVA'
+          import org.pactman.nonprofitcheckplus.Ein;
+          import org.pactman.nonprofitcheckplus.SdkVersion;
+
+          public final class Consumer {
+              public static void main(String[] args) {
+                  System.out.println(Ein.normalize("41-1787097") + " " + SdkVersion.VERSION);
+              }
+          }
+          JAVA
+          mvn -B -q -f /tmp/consumer/pom.xml package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: java/sdk/target/*.jar

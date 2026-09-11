@@ -23,6 +23,13 @@ build/
 .coverage
 htmlcov/
 
+# Java
+target/
+*.class
+.mvn/
+mvnw
+mvnw.cmd
+
 # .NET
 bin/
 obj/
