@@ -1,0 +1,61 @@
+name: publish-go
+
+# Go modules are published by their git tag: proxy.golang.org serves whatever
+# the tag points at, and there is no upload step. A module in a subdirectory
+# must be tagged with that directory as a prefix, so a release of go/ is the
+# tag `go/v1.0.0` — not `go-v1.0.0` like the other SDKs, which Go would ignore.
+#
+# This workflow checks the tag before anyone depends on it, then asks the
+# proxy to fetch it so the version is available immediately.
+
+on:
+  push:
+    tags: ['go/v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: go
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: create an environment of this name in repo settings to require
+    # a manual approval before the proxy is asked to fetch. Delete if not wanted.
+    environment: go-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      # pactman.Version is what the User-Agent reports; the tag is what users
+      # install. A tag cannot be moved once the proxy has served it, so the two
+      # are held together here, before that happens.
+      - name: Fail if the tag and pactman.Version disagree
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#go/v}"
+          SRC_VERSION="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' pactman/version.go)"
+          if [ "$TAG_VERSION" != "$SRC_VERSION" ]; then
+            echo "Tag says $TAG_VERSION but pactman/version.go says $SRC_VERSION."
+            exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go run ./internal/devtools examples-smoke
+
+      - name: Ask the Go module proxy to fetch the release
+        if: github.event_name == 'push'
+        run: |
+          MODULE=github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/go
+          cd "$(mktemp -d)"
+          go mod init example.com/warm
+          GOPROXY=https://proxy.golang.org go list -m "$MODULE@${GITHUB_REF_NAME#go/}"

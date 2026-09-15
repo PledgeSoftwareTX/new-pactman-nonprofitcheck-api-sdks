@@ -1,0 +1,105 @@
+name: go-sdk
+
+on:
+  push:
+    branches: [master]
+    paths: ['go/**', 'nodejs/src/response-contract.json', '.github/workflows/go-ci.yml']
+  pull_request:
+    paths: ['go/**', 'nodejs/src/response-contract.json', '.github/workflows/go-ci.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: go
+
+jobs:
+  verify:
+    # go.mod declares 1.22 as the floor, so the module is compiled and tested on
+    # that release as well as on the two Go currently supports — a floor nobody
+    # builds against is a guess, and vet cannot see a newer stdlib call from here.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22.x', 'oldstable', 'stable']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The module has no dependencies and so no go.sum for the cache to key on.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt -w on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Includes the check that internal/contract/response-contract.json is
+      # byte-identical to the Node SDK's, which is why this workflow also runs
+      # when that file changes.
+      - name: Unit tests
+        run: go test -race ./...
+
+      - name: Run the documented examples against the fixture API
+        run: go run ./internal/devtools examples-smoke
+
+  staticcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+  consumer:
+    # A module that resolves cleanly into a fresh project is the only proof the
+    # module path and the (empty) dependency set are right.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Build a throwaway consumer against this checkout
+        run: |
+          MODULE=github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/go
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          go mod init example.com/consumer
+          go mod edit -require="$MODULE@v0.0.0" -replace="$MODULE=$GITHUB_WORKSPACE/go"
+          cat > main.go <<'GO'
+          package main
+
+          import (
+          	"fmt"
+
+          	"github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/go/pactman"
+          )
+
+          func main() {
+          	ein, err := pactman.NormalizeEIN("41-1787097")
+          	if err != nil {
+          		panic(err)
+          	}
+
+          	fmt.Println(ein, pactman.Version)
+          }
+          GO
+          go run .
