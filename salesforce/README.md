@@ -7,11 +7,15 @@ Distributed as a **second-generation managed package**, not through a registry.
 Subscriber orgs install it from a package install URL; there is no `npm install`
 equivalent.
 
-> **Status: not yet validated.** Every class here was written against the Node
-> SDK's contract but has never been compiled — the machine it was authored on
-> has no Salesforce CLI. Nothing has been deployed to a scratch org, no Apex
-> test has run, and the Named Credential metadata has not been round-tripped.
-> Treat the first `sf project deploy start` as the real first compile.
+> **Status: not yet deployed.** Every class here was written against the Node
+> SDK's contract, and the offline checks pass — `npm run check` parses all of it
+> with the Apex grammar, resolves every reference the examples make against the
+> SDK's declared members, and confirms version and contract parity. But the
+> machine it was authored on has no Salesforce CLI: nothing has been deployed to
+> a scratch org, no Apex test has run, and the Named Credential metadata has not
+> been round-tripped. Treat the first `sf project deploy start` as the real first
+> compile, and expect it to find things a grammar cannot — type inference,
+> governor limits, and whether `Test.setMock` behaves as the examples assume.
 
 ---
 
@@ -194,19 +198,53 @@ from an index signature.
 For volumes beyond a few thousand EINs, drive `checkBulk` from Batch Apex with
 `Database.AllowsCallouts` rather than chaining Queueables.
 
+## Examples
+
+Thirty worked examples live in [`examples-app/`](./examples-app), matching
+`ex-01` – `ex-30` in the Node, Python, Go, Java and .NET SDKs: client setup,
+every source on a record, each error category, bulk semantics and five
+end-to-end workflows. [`examples-app/README.md`](./examples-app/README.md) lists
+what each one demonstrates.
+
+They are Apex test classes, because `Test.setMock` is the only context in which
+a revoked exemption, an OFAC match or an HTTP 429 can be produced on demand — so
+every example asserts what it claims, and the whole set runs on every push.
+
+```bash
+sf apex run test --target-org pactman-dev --test-level RunLocalTests \
+  --result-format human --wait 20
+```
+
+`examples-app` is unpackaged: a scratch org gets it, a subscriber does not.
+
+Four of them reach different conclusions from their counterparts elsewhere,
+because the platform leaves no choice — no readable credential (EX-01), no
+sleep (EX-22, EX-23) and no cancellation (EX-24). Those are the ones to read
+first if you already know another Pactman SDK.
+
 ## Development
 
 ```bash
+npm install     # the offline checks below; not part of the package
 sf org create scratch --definition-file config/project-scratch-def.json --alias pactman-dev --set-default
 sf project deploy start
 sf apex run test --test-level RunLocalTests --code-coverage --result-format human
-node scripts/check-parity.mjs
+npm run check
 ```
 
-`check-parity.mjs` is the CI equivalent of the version and contract tests the
-other SDKs run in-process: Apex cannot read `sfdx-project.json` at runtime, so
-the assertions that `SdkVersion.VERSION` matches the package version and that
-`Nonprofit.cls` declares exactly the contract's fields live in CI instead.
+`npm run check` runs two things that need no org, and CI runs both before it
+tries to create one:
+
+- `scripts/check-parity.mjs` — the CI equivalent of the version and contract
+  tests the other SDKs run in-process. Apex cannot read `sfdx-project.json` at
+  runtime, so the assertions that `SdkVersion.VERSION` matches the package
+  version and that `Nonprofit.cls` declares exactly the contract's fields live
+  in CI instead.
+- `scripts/check-apex.mjs` — parses every `.cls` with the Apex grammar and
+  resolves every `Type.member` reference in the examples against what the SDK
+  actually declares. A scratch org is the only real Apex compiler; this is the
+  part of it that runs in four seconds. It is what catches a method named after
+  a reserved word, which reads perfectly and does not parse.
 
 `namespace` in `sfdx-project.json` is deliberately empty. Set it once the
 namespace is registered and linked to the Dev Hub; scratch-org development works

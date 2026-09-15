@@ -413,27 +413,33 @@ The Node.js SDK is the reference implementation; this package makes the same pro
 
 ## Examples
 
-Runnable examples live in [`examples/`](./examples). They read `PACTMAN_API_KEY` from the environment and contain no credentials.
+Thirty numbered examples live in [`examples/`](./examples), covering client
+setup, every source on a record, each error category, bulk semantics and five
+end-to-end workflows. They read `PACTMAN_API_KEY` from the environment and
+contain no credentials. [`examples/README.md`](./examples/README.md) lists what
+each one demonstrates.
 
 ```bash
 cd go
+PACTMAN_API_KEY=your_key go run ./examples/ex-01-secure-client-init
 PACTMAN_API_KEY=your_key go run ./examples/quickstart 41-1787097
 PACTMAN_API_KEY=your_key go run ./examples/bulk
 PACTMAN_API_KEY=your_key go run ./examples/error-handling
 ```
 
-|                                                   |                                       |
-| ------------------------------------------------- | ------------------------------------- |
-| [`quickstart`](./examples/quickstart/main.go)         | The shortest useful single check.     |
-| [`bulk`](./examples/bulk/main.go)                     | The shortest useful bulk check.       |
-| [`error-handling`](./examples/error-handling/main.go) | Branching on error category in one place. |
+Most of them need a record or a response production will not produce on request
+— a revoked exemption, an OFAC match, an HTTP 429, a field newer than this SDK —
+so they start the bundled fixture API themselves. `PACTMAN_BASE_URL` points them
+somewhere else.
 
-CI runs every example against a bundled fixture API on every push:
+CI runs every example against that fixture API on every push. An example that
+stops demonstrating what it claims exits non-zero and fails the build, rather
+than going stale unnoticed in a directory nobody runs:
 
 ```bash
 go run ./internal/devtools examples-smoke                     # pass/fail
 EXAMPLES_VERBOSE=1 go run ./internal/devtools examples-smoke  # with output
-go run ./internal/devtools examples-smoke quickstart          # a subset
+go run ./internal/devtools examples-smoke ex-22 ex-23         # a subset
 ```
 
 ## Development

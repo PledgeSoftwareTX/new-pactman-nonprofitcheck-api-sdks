@@ -1,0 +1,14 @@
+{
+  "name": "pactman-nonprofit-check-salesforce-tooling",
+  "private": true,
+  "description": "Development-time checks for the Salesforce SDK. Not part of the managed package.",
+  "type": "module",
+  "scripts": {
+    "check:parity": "node scripts/check-parity.mjs",
+    "check:apex": "node scripts/check-apex.mjs",
+    "check": "npm run check:parity && npm run check:apex"
+  },
+  "devDependencies": {
+    "@apexdevtools/apex-parser": "^4.4.0"
+  }
+}

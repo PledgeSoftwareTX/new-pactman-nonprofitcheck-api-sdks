@@ -30,8 +30,19 @@ jobs:
         with:
           node-version: '22.x'
 
+      - name: Install the development tooling
+        run: npm ci
+
       - name: Version and contract parity
         run: node scripts/check-parity.mjs
+
+      # Syntax and reference checks over every Apex class. A scratch org is the
+      # only real Apex compiler and this job does not have one, so these run
+      # the part of a deploy that needs no org — and catch a method named after
+      # a reserved word, or an accessor that does not exist, before the deploy
+      # job spends twenty minutes finding out.
+      - name: Apex syntax and references
+        run: node scripts/check-apex.mjs
 
   apex:
     runs-on: ubuntu-latest
