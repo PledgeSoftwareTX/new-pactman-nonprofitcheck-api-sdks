@@ -1,0 +1,93 @@
+AllCops:
+  TargetRubyVersion: 3.3
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "vendor/**/*"
+    - ".bundle/**/*"
+    - "pkg/**/*"
+
+Layout/LineLength:
+  Max: 120
+
+# Wire field names are mirrored verbatim — `address_line1`, `pub78_verified`,
+# `foundation_509a_status` — so what the API reference says is what the code says.
+Naming/VariableNumber:
+  Enabled: false
+
+# The library documents its public classes. Tests, scripts and examples are read
+# top to bottom, and their file headers do that job.
+Style/Documentation:
+  Exclude:
+    - "test/**/*"
+    - "scripts/**/*"
+    - "examples/**/*"
+
+# Examples are standalone scripts; `include Print` at the top keeps each one on
+# its subject rather than on `Print.field`.
+Style/MixinUsage:
+  Exclude:
+    - "examples/**/*"
+
+# A top-level `def` in a script is the script's helper, not a monkey patch.
+Style/TopLevelMethodDefinition:
+  Enabled: false
+
+# The harness and the examples narrate: long methods that read top to bottom are
+# the point of them, and splitting a check into fragments would hide what it
+# asserts. The library itself stays within the defaults below.
+Metrics/AbcSize:
+  Max: 30
+  Exclude: &narrative
+    - "test/**/*"
+    - "scripts/**/*"
+    - "examples/**/*"
+
+Metrics/MethodLength:
+  Max: 30
+  Exclude: *narrative
+
+Metrics/BlockLength:
+  Exclude:
+    - "test/**/*"
+    - "scripts/**/*"
+    - "examples/**/*"
+    - "*.gemspec"
+
+Metrics/ModuleLength:
+  Max: 200
+  Exclude: *narrative
+
+# The transport and the configuration resolver each hold one concern end to end;
+# splitting them to meet a line count would scatter the retry loop and the
+# validation messages across files that are only ever read together.
+Metrics/ClassLength:
+  Max: 200
+  Exclude: *narrative
+
+Metrics/CyclomaticComplexity:
+  Max: 12
+  Exclude: *narrative
+
+Metrics/PerceivedComplexity:
+  Max: 12
+  Exclude: *narrative
+
+# The retry policy and the client take one keyword per documented option.
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+# `ErrorCategory`, `ErrorOrigin` and friends are namespaces of constants.
+Style/ClassAndModuleChildren:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+# Named after the gem so `Bundler.require` finds it.
+Naming/FileName:
+  Exclude:
+    - "lib/pactman-nonprofit-check-plus.rb"

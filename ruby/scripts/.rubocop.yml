@@ -1,0 +1,6 @@
+inherit_from: ../.rubocop.yml
+
+# The harness reports in sentences, and a check's assertion reads best with its
+# message on the same line.
+Layout/LineLength:
+  Max: 140

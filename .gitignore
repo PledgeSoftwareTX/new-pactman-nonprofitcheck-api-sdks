@@ -37,3 +37,10 @@ artifacts/
 *.user
 .vs/
 TestResults/
+
+# Ruby
+ruby/.bundle/
+ruby/vendor/
+ruby/pkg/
+ruby/Gemfile.lock
+*.gem

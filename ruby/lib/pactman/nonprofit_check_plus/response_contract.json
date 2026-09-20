@@ -1,0 +1,72 @@
+{
+  "note": "What this gem predicts each response looks like: path, JSON type and value format, never a value. Derived from the field declarations in models.rb and hand-maintained alongside them; test/response_contract_test.rb holds the two in sync. scripts/smoke_live.rb checks a live deployment against this. A diff here is a deliberate change to what the SDK promises.",
+  "required": {
+    "envelope": [],
+    "errorDetail": [],
+    "nonprofit": [],
+    "organizationType": []
+  },
+  "envelope": {
+    "code": "number",
+    "message": "string",
+    "errors": "array|null|string",
+    "timeTaken": "null|number",
+    "nonprofit_check_count": "null|number"
+  },
+  "errorDetail": {
+    "resource": "string",
+    "reason": "string",
+    "code": "number",
+    "eins": "array|string"
+  },
+  "nonprofit": {
+    "pactman_org_url": "null|url",
+    "organization_info_last_modified": "date|null",
+    "ein": "digits:9|null",
+    "organization_name": "null|string",
+    "organization_name_aka": "null|string",
+    "address_line1": "null|string",
+    "address_line2": "null|string",
+    "city": "null|string",
+    "state": "null|string",
+    "state_name": "null|string",
+    "zip": "null|string",
+    "filing_req_code": "null|string",
+    "pub78_church_message": "null|string",
+    "pub78_organization_name": "null|string",
+    "pub78_ein": "digits:9|null",
+    "pub78_verified": "boolean|null",
+    "pub78_city": "null|string",
+    "pub78_state": "null|string",
+    "pub78_indicator": "null|string",
+    "organization_types": "array|null",
+    "most_recent_pub78": "null|string",
+    "bmf_church_message": "null|string",
+    "bmf_organization_name": "null|string",
+    "bmf_ein": "digits:9|null",
+    "bmf_status": "boolean|null",
+    "bmf_subsection": "null|string",
+    "most_recent_bmf": "date|null",
+    "subsection_description": "null|string",
+    "foundation_code": "null|string",
+    "foundation_code_description": "null|string",
+    "foundation_type_code": "null|string",
+    "foundation_type_description": "null|string",
+    "foundation_509a_status": "null|string",
+    "ruling_month": "null|string",
+    "ruling_year": "null|string",
+    "group_exemption": "null|string",
+    "exempt_status_code": "null|string",
+    "ofac_status": "null|ofac-sentence",
+    "revocation_code": "null|string",
+    "revocation_date": "null|string",
+    "reinstatement_date": "null|string",
+    "irs_bmf_pub78_conflict": "boolean|null",
+    "report_date": "date|null"
+  },
+  "organizationType": {
+    "organization_type": "null|string",
+    "deductibility_limitation": "null|string",
+    "deductibility_status_description": "null|string"
+  }
+}

@@ -1,0 +1,41 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "minitest/test_task"
+require "rubocop/rake_task"
+
+Minitest::TestTask.create(:test) do |task|
+  task.libs << "scripts"
+  task.test_globs = ["test/**/*_test.rb"]
+  task.warning = true
+end
+
+RuboCop::RakeTask.new(:lint)
+
+namespace :examples do
+  desc "Run every example against the bundled mock server (what CI runs)"
+  task :smoke do
+    ruby "scripts/run_examples_against_mock.rb", *ENV.fetch("EXAMPLES", "").split
+  end
+end
+
+namespace :smoke do
+  desc "Check a live deployment against the contract and the recorded baseline. Spends real quota."
+  task :live do
+    ruby "scripts/smoke_live.rb"
+  end
+end
+
+namespace :baseline do
+  desc "Record production's response shape into response_baseline.json. Spends real quota."
+  task :record do
+    ruby "scripts/record_baseline.rb"
+  end
+end
+
+desc "Start the mock Pactman API on PORT (default 4010)"
+task :mock do
+  ruby "scripts/mock_server.rb", ENV.fetch("PORT", "4010")
+end
+
+task default: %i[lint test]

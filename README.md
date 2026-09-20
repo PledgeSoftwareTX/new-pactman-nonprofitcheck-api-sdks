@@ -11,6 +11,7 @@ One directory per language, each published independently.
 | .NET / C#            | `Pactman.NonprofitCheckPlus`       | Available | [dotnet/README.md](./dotnet/README.md) |
 | Java                 | `org.pactman:pactman-nonprofit-check-plus` | Available | [java/README.md](./java/README.md)     |
 | Go                   | `github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/go` | In development | [go/README.md](./go/README.md) |
+| Ruby                 | `pactman-nonprofit-check-plus`     | In development | [ruby/README.md](./ruby/README.md) |
 | PHP                  | `pactmandev/nonprofit-check-plus`  | Available | [separate repository][php-sdk]         |
 
 [php-sdk]: https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-php-sdk

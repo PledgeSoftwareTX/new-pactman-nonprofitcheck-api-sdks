@@ -1,0 +1,59 @@
+name: publish-ruby
+
+# Publishes ruby/ to RubyGems when a tag like `ruby-v1.0.0` is pushed.
+# The tag prefix keeps this from firing for SDKs in other languages.
+
+on:
+  push:
+    tags: ['ruby-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for RubyGems trusted publishing
+
+defaults:
+  run:
+    working-directory: ruby
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: create an environment of this name in repo settings to require
+    # a manual approval before anything reaches RubyGems. Delete if not wanted.
+    environment: rubygems-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+
+      - name: Fail if the tag and the gem version disagree
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#ruby-v}"
+          GEM_VERSION="$(ruby -r ./lib/pactman/nonprofit_check_plus/version -e 'print Pactman::NonprofitCheckPlus::VERSION')"
+          if [ "$TAG_VERSION" != "$GEM_VERSION" ]; then
+            echo "Tag says $TAG_VERSION but version.rb says $GEM_VERSION."
+            exit 1
+          fi
+
+      - run: bundle exec rake lint
+      - run: bundle exec rake test
+      - run: bundle exec rake examples:smoke
+
+      - name: Build the gem
+        run: gem build pactman-nonprofit-check-plus.gemspec --strict
+
+      # Trusted publishing: register this repo and workflow as a trusted
+      # publisher for the gem on rubygems.org, and no API key is needed. The
+      # gemspec sets rubygems_mfa_required, which trusted publishing satisfies.
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Publish to RubyGems
+        run: gem push pactman-nonprofit-check-plus-*.gem
