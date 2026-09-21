@@ -46,7 +46,8 @@ public final class SmokeLive {
      * Runs the checks.
      *
      * @param args {@code --ein <ein>}, {@code --bulk <ein,ein>},
-     *             {@code --baseline <path>}, {@code --record <path>}.
+     *             {@code --baseline <path>} to compare against a recording other than
+     *             the committed one, {@code --record <path>} to write one instead.
      * @return the number of checks that failed.
      * @throws IOException when a baseline cannot be read or written.
      */
@@ -99,13 +100,16 @@ public final class SmokeLive {
                         singleSignature, bulkSignature);
                 System.out.println();
                 System.out.println("Recorded a baseline at " + target);
-            } else if (baselinePath != null) {
-                failures += checkAgainstBaseline(
-                        Path.of(baselinePath), singleSignature, bulkSignature);
             } else {
+                Map<String, Object> baseline = baselinePath == null
+                        ? ContractResources.baseline()
+                        : readBaseline(Path.of(baselinePath));
+
                 System.out.println();
-                System.out.println("No baseline given; pass --baseline <path> to compare against"
-                        + " one, or --record <path> to write one.");
+                System.out.println("Comparing against "
+                        + (baselinePath == null ? "the committed recording" : baselinePath)
+                        + " (recorded " + baseline.get("recordedAt") + ")");
+                failures += checkAgainstBaseline(baseline, singleSignature, bulkSignature);
             }
         }
 
@@ -149,12 +153,13 @@ public final class SmokeLive {
     }
 
     @SuppressWarnings("unchecked")
-    private static int checkAgainstBaseline(
-            Path baselinePath, Map<String, String> single, Map<String, String> bulk)
-            throws IOException {
-        Map<String, Object> baseline = (Map<String, Object>) Json.parse(
+    private static Map<String, Object> readBaseline(Path baselinePath) throws IOException {
+        return (Map<String, Object>) Json.parse(
                 new String(Files.readAllBytes(baselinePath), StandardCharsets.UTF_8));
+    }
 
+    private static int checkAgainstBaseline(
+            Map<String, Object> baseline, Map<String, String> single, Map<String, String> bulk) {
         int failures = 0;
 
         for (String[] pair : new String[][] {{"single", "single"}, {"bulk", "bulk"}}) {

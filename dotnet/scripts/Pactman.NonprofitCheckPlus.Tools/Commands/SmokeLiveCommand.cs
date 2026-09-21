@@ -193,14 +193,15 @@ internal static class SmokeLiveCommand
 
             // Fields the API sent that the package does not predict, and fields it
             // predicts that the API did not send. Both directions fail.
-            var fields = Contract.CoverageDiff(expected, signature);
+            var fields = Contract.CoverageDiff(expected, signature, Contract.RequiredPathsOf(contract, kind));
 
             results.Add(new CheckResult(
                 fields.Changes.Count == 0 ? "pass" : "fail",
                 kind,
                 "fields",
                 fields.Changes.Count == 0
-                    ? $"{paths} paths, all predicted · {fields.Unreachable} predicted under a null or empty parent"
+                    ? $"{paths} paths, all predicted · {fields.Unreachable} under a null or empty parent · "
+                      + $"{fields.OptionalAbsent} optional and not sent"
                     : $"the live {kind} response and this package disagree on which fields exist — "
                       + Contract.SummarizeChanges(fields.Changes),
                 fields.Changes.Count == 0

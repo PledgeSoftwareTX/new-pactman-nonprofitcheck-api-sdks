@@ -3,6 +3,8 @@ package org.pactman.nonprofitcheckplus.examples.support;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import org.pactman.nonprofitcheckplus.examples.cases.Bulk;
+import org.pactman.nonprofitcheckplus.examples.cases.ErrorHandling;
 import org.pactman.nonprofitcheckplus.examples.cases.Ex01SecureClientInit;
 import org.pactman.nonprofitcheckplus.examples.cases.Ex02EinNormalization;
 import org.pactman.nonprofitcheckplus.examples.cases.Ex03IdentityLookup;
@@ -75,7 +77,9 @@ public final class Catalog {
             new Ex27DafGrantScreening(),
             new Ex28CrmEnrichment(),
             new Ex29PreDisbursementRecheck(),
-            new Ex30PortfolioReverification()));
+            new Ex30PortfolioReverification(),
+            new Bulk(),
+            new ErrorHandling()));
 
     private Catalog() {
     }

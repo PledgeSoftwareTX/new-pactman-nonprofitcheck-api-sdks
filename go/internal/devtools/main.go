@@ -3,9 +3,14 @@
 //
 //	go run ./internal/devtools mock [port]                the fixture API, standalone
 //	go run ./internal/devtools examples-smoke [filter...]  every example, against the fixture API
+//	go run ./internal/devtools contract                    the signature this package predicts
+//	go run ./internal/devtools smoke-live                  a live deployment against the contract and the recording
+//	go run ./internal/devtools baseline-record             rewrite the committed recording from a live deployment
 //
 // examples-smoke is what CI uses to keep the documented examples honest. Set
-// EXAMPLES_VERBOSE=1 to see each example's output.
+// EXAMPLES_VERBOSE=1 to see each example's output. smoke-live and
+// baseline-record spend real quota: set PACTMAN_API_KEY, and PACTMAN_BASE_URL
+// to point them anywhere but production.
 package main
 
 import (
@@ -28,7 +33,10 @@ import (
 
 const usage = `Usage:
   go run ./internal/devtools mock [port]
-  go run ./internal/devtools examples-smoke [filter...]`
+  go run ./internal/devtools examples-smoke [filter...]
+  go run ./internal/devtools contract
+  go run ./internal/devtools smoke-live [-ein EIN] [-bulk EIN,EIN] [-baseline PATH]
+  go run ./internal/devtools baseline-record [-ein EIN] [-bulk EIN,EIN]`
 
 func main() {
 	if len(os.Args) < 2 {
@@ -41,6 +49,12 @@ func main() {
 		os.Exit(runMock(os.Args[2:]))
 	case "examples-smoke":
 		os.Exit(examplesSmoke(os.Args[2:]))
+	case "contract":
+		os.Exit(printContract())
+	case "smoke-live":
+		os.Exit(min(smokeLive(os.Args[2:]), 1))
+	case "baseline-record":
+		os.Exit(min(recordBaseline(os.Args[2:]), 1))
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import random as _random
 import threading
 import time
@@ -125,16 +126,20 @@ class _BaseTransport:
     def _build_headers(
         self, per_request: Mapping[str, str] | None, has_body: bool
     ) -> dict[str, str]:
-        headers: dict[str, str] = {**self._config.default_headers, **(per_request or {})}
+        headers: dict[str, str] = {}
+
+        for source in (self._config.default_headers, per_request or {}):
+            for name, value in source.items():
+                _set_header(headers, name, value)
 
         # Set last so neither the client defaults nor a per-request header can
-        # displace the credential or misdeclare the payload.
-        headers["Accept"] = "application/json"
-        headers["User-Agent"] = self._config.user_agent
-        headers["Authorization"] = f"Bearer {self._api_key}"
+        # displace the credential or misdeclare the payload, whatever its case.
+        _set_header(headers, "Accept", "application/json")
+        _set_header(headers, "User-Agent", self._config.user_agent)
+        _set_header(headers, "Authorization", f"Bearer {self._api_key}")
 
         if has_body:
-            headers["Content-Type"] = "application/json"
+            _set_header(headers, "Content-Type", "application/json")
 
         return headers
 
@@ -423,7 +428,7 @@ def read_retry_after(headers: httpx.Headers, now: float | None = None) -> float 
     except ValueError:
         pass
     else:
-        return seconds if seconds >= 0 else None
+        return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
     try:
         parsed = parsedate_to_datetime(trimmed)
@@ -433,6 +438,19 @@ def read_retry_after(headers: httpx.Headers, now: float | None = None) -> float 
     reference = time.time() if now is None else now
 
     return max(0.0, parsed.timestamp() - reference)
+
+
+def _set_header(headers: dict[str, str], name: str, value: str) -> None:
+    """
+    Sets a header, replacing any spelling of the same name already present.
+
+    Header names are case-insensitive, so ``authorization`` and ``Authorization``
+    are one header. Without this they would both be sent.
+    """
+    for existing in [key for key in headers if key.lower() == name.lower()]:
+        del headers[existing]
+
+    headers[name] = value
 
 
 def normalize_api_errors(errors: Any) -> list[ApiErrorDetail]:

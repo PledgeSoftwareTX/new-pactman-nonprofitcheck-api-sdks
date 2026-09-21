@@ -89,7 +89,7 @@ pactman.BmfSource bmf = pactman.Sources.getBmf(result.nonprofit);
 | EX-15 | [Ex15MalformedEin](./main/default/classes/Ex15MalformedEin.cls)                          | Malformed input rejected locally, proven by a mock that counts: no callout, no quota, no governor limit.    |
 | EX-16 | [Ex16NotFound](./main/default/classes/Ex16NotFound.cls)                                  | A well-formed EIN with no record, and the same failure rendered for a structured log.                      |
 | EX-22 | [Ex22RateLimit](./main/default/classes/Ex22RateLimit.cls)                                | HTTP 429, `Retry-After`, and why Apex surfaces it instead of waiting.                                      |
-| EX-23 | [Ex23TransientRetries](./main/default/classes/Ex23TransientRetries.cls)                  | The one thing this SDK retries — a lost `GET`, once — and everything it does not.                          |
+| EX-23 | [Ex23TransientRetries](./main/default/classes/Ex23TransientRetries.cls)                  | The one thing this SDK retries — a lost response, once — and everything it does not.                       |
 | EX-24 | [Ex24TimeoutAndCancellation](./main/default/classes/Ex24TimeoutAndCancellation.cls)      | `TimeoutException` versus `NetworkException`, the platform ceilings, and why cancellation does not exist.   |
 | EX-25 | [Ex25RawAndForwardCompat](./main/default/classes/Ex25RawAndForwardCompat.cls)            | Fields and an enum value this version has never heard of, readable without a package upgrade.               |
 
@@ -113,6 +113,17 @@ pactman.BmfSource bmf = pactman.Sources.getBmf(result.nonprofit);
 | EX-29 | [Ex29PreDisbursementRecheck](./main/default/classes/Ex29PreDisbursementRecheck.cls)        | A re-check in the path of a payment that fails closed when it cannot complete.                     |
 | EX-30 | [Ex30PortfolioReverification](./main/default/classes/Ex30PortfolioReverification.cls)      | A scheduled sweep producing a work queue, and when to move it to Batch Apex.                       |
 
+### A first read
+
+Three shorter examples sit alongside the numbered set, matching `quickstart`,
+`bulk` and `error-handling` in the other SDKs.
+
+|                                                                     |                                                                  |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [Quickstart](./main/default/classes/Quickstart.cls)                 | The smallest useful lookup, and three source findings.           |
+| [BulkOverview](./main/default/classes/BulkOverview.cls)             | One request for a batch, with local validation and iteration.    |
+| [ErrorHandlingOverview](./main/default/classes/ErrorHandlingOverview.cls) | Every failure turned into an action by type, never by message. |
+
 ## Where Apex genuinely differs
 
 Four of these examples reach a different conclusion from their counterparts in
@@ -123,7 +134,7 @@ even if you know the other SDKs well.
 | ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | EX-01   | Load a key from the environment; prove it never leaks.  | There is no key in Apex. The platform injects it from the External Credential, so there is no diagnostic surface to audit.                 |
 | EX-22   | Wait `Retry-After` and retry; throttle client-side.     | Apex cannot sleep. `Retry-After` is surfaced on the exception, and `CheckQueueable` is where real backoff happens.                          |
-| EX-23   | Retry transient 5xx with jittered exponential backoff.  | One immediate retry, for a `GET` that produced no response. A `POST` is never retried — the bulk endpoint bills per EIN.                    |
+| EX-23   | Retry transient 5xx with jittered exponential backoff.  | One immediate retry, for a single or bulk check that produced no response. Timeouts and HTTP errors are surfaced.                             |
 | EX-24   | `AbortSignal` / context cancellation.                   | No cancellation primitive exists. What there is instead: a 120-second per-callout ceiling and a 120-second cumulative budget per transaction. |
 
 ## Shared helpers

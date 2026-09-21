@@ -179,6 +179,9 @@ class RetryTest {
                 "a date in the past means retry now, not retry in the past");
         assertEquals(null, Transport.readRetryAfter("soon please", now));
         assertEquals(null, Transport.readRetryAfter("  ", now));
+        assertEquals(null, Transport.readRetryAfter("Infinity", now), "no wait can honour it");
+        assertEquals(null, Transport.readRetryAfter("1e400", now), "overflows to infinity");
+        assertEquals(null, Transport.readRetryAfter("NaN", now));
         assertEquals(null, Transport.readRetryAfter(null, now));
     }
 

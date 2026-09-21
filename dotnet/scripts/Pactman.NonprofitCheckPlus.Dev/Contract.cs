@@ -615,7 +615,8 @@ public static class Contract
     /// <summary>How a coverage comparison came out.</summary>
     /// <param name="Changes">Fields that appeared unpredicted, or predicted fields that stopped arriving.</param>
     /// <param name="Unreachable">Predicted paths excused as sitting under a null or empty parent.</param>
-    public sealed record CoverageComparison(IReadOnlyList<Change> Changes, int Unreachable);
+    /// <param name="OptionalAbsent">Predicted paths excused as optional and not sent.</param>
+    public sealed record CoverageComparison(IReadOnlyList<Change> Changes, int Unreachable, int OptionalAbsent);
 
     /// <summary>
     /// Fields the API sent that the package does not predict, and fields it predicts that
@@ -639,10 +640,16 @@ public static class Contract
     /// A container that vanished is reported once, at its shallowest path: a <c>data</c>
     /// that stopped arriving is one failure, not fifty-nine.
     /// </para>
+    /// <para>
+    /// A field the model declares optional is permitted to be absent, so with
+    /// <paramref name="required"/> given, an absent path it does not list is counted
+    /// rather than failed. Without it every predicted path is treated as required.
+    /// </para>
     /// </remarks>
     public static CoverageComparison CoverageDiff(
         IReadOnlyDictionary<string, string> expected,
-        IReadOnlyDictionary<string, string> observed)
+        IReadOnlyDictionary<string, string> observed,
+        IReadOnlySet<string>? required = null)
     {
         var changes = new List<Change>();
 
@@ -658,6 +665,7 @@ public static class Contract
             .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
 
         var unreachable = 0;
+        var optionalAbsent = 0;
 
         foreach (var entry in missing)
         {
@@ -673,9 +681,70 @@ public static class Contract
                 continue;
             }
 
+            if (required != null && !required.Contains(entry.Key))
+            {
+                optionalAbsent++;
+
+                continue;
+            }
+
             changes.Add(new Change("removed", entry.Key, Token: entry.Value));
         }
 
-        return new CoverageComparison(Sort(changes), unreachable);
+        return new CoverageComparison(Sort(changes), unreachable, optionalAbsent);
+    }
+
+    /// <summary>
+    /// The paths a response must carry: the structural ones every envelope has, and
+    /// whatever the contract's <c>required</c> block lists.
+    /// </summary>
+    /// <remarks>
+    /// Optionality is the promise the package actually makes. A property that may be
+    /// absent says "this may not be here", so a response without it keeps the promise,
+    /// and failing on its absence tests the deployment's current data rather than the
+    /// package's contract.
+    /// </remarks>
+    public static IReadOnlySet<string> RequiredPathsOf(JsonElement contract, string kind)
+    {
+        var single = kind == "single";
+        var prefix = single ? "data." : "data[].";
+
+        // The shape of the envelope itself, which is not optional in any response.
+        var paths = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "data",
+            "errors[]",
+            "errors[].eins[]",
+            prefix + "organization_types[]",
+        };
+
+        if (!single)
+        {
+            paths.Add("data[]");
+        }
+
+        if (!contract.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Object)
+        {
+            return paths;
+        }
+
+        foreach (var (section, pathPrefix) in new[]
+        {
+            ("envelope", string.Empty),
+            ("errorDetail", "errors[]."),
+            ("nonprofit", prefix),
+            ("organizationType", prefix + "organization_types[]."),
+        })
+        {
+            if (required.TryGetProperty(section, out var fields) && fields.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var field in fields.EnumerateArray())
+                {
+                    paths.Add(pathPrefix + field.GetString());
+                }
+            }
+        }
+
+        return paths;
     }
 }

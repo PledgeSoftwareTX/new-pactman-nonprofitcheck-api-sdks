@@ -257,6 +257,31 @@ public class ContractTests
     }
 
     [Fact]
+    public void CoverageCountsAnAbsentOptionalFieldInsteadOfFailingIt()
+    {
+        var expected = Map(("data", "null|object"), ("data.ein", "digits:9"));
+        var observed = Map(("data", "object"));
+
+        var comparison = Contract.CoverageDiff(expected, observed, new HashSet<string> { "data" });
+
+        Assert.Empty(comparison.Changes);
+        Assert.Equal(1, comparison.OptionalAbsent);
+    }
+
+    [Fact]
+    public void RequiresOnlyTheEnvelopeStructureOfEachResponse()
+    {
+        var contract = Fixtures.ResponseContract();
+
+        Assert.Equal(
+            new[] { "data", "data.organization_types[]", "errors[]", "errors[].eins[]" },
+            Contract.RequiredPathsOf(contract, "single").OrderBy(path => path, StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "data", "data[]", "data[].organization_types[]", "errors[]", "errors[].eins[]" },
+            Contract.RequiredPathsOf(contract, "bulk").OrderBy(path => path, StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void ContractDiffNamesOnlyTheOffendingTokens()
     {
         var expected = Map(("data.pub78_verified", "boolean|null"));

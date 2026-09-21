@@ -534,6 +534,8 @@ Examples that need a record or a response a live API will not produce on request
 | Bulk                         | `ex-17` to `ex-21` — screening, ordering, partial success, limits, usage |
 | End-to-end workflows         | `ex-26` to `ex-30` — onboarding, DAF screening, CRM enrichment, re-checks |
 
+Three shorter examples sit alongside the numbered set for a first read: `quickstart`, `bulk` and `error-handling`.
+
 ## Building from source
 
 ```bash
@@ -561,22 +563,27 @@ what this package tells its users.
 ```bash
 mvn -q -DskipTests install
 
-# Does the API still match what this package promises?
+# Does the API still match what this package promises, and has it moved since
+# the committed recording?
 PACTMAN_API_KEY=... mvn -q -pl devtools exec:java \
     -Dexec.args="smoke-live --ein 41-1787097"
 
-# Has it moved since we last looked? Record once, compare later.
+# Production moved, and the move is intended: rewrite the committed recording.
+PACTMAN_API_KEY=... mvn -q -pl devtools exec:java -Dexec.args="baseline-record"
+
+# Compare against, or write, a recording somewhere else instead.
 PACTMAN_API_KEY=... mvn -q -pl devtools exec:java \
-    -Dexec.args="smoke-live --record baseline.json"
-PACTMAN_API_KEY=... mvn -q -pl devtools exec:java \
-    -Dexec.args="smoke-live --baseline baseline.json"
+    -Dexec.args="smoke-live --baseline other.json"
 
 # The stand-in API, for pointing your own application at.
 mvn -q -pl devtools exec:java -Dexec.args="mock"
 ```
 
-A baseline records shapes only — path, JSON type and value format, never a
-value — so it is safe to commit and a diff of it is safe to print. It is
+The committed recording is
+`devtools/src/main/resources/.../response-baseline.json`, and every
+`smoke-live` run is held against it. A baseline records shapes only — path,
+JSON type and value format, never a value — so it is safe to commit and a diff
+of it is safe to print. It is
 compared with nullability and reachability excused, because a recording is one
 organization's response on one afternoon and much of what separates it from
 today's run is a different subject rather than the API changing.

@@ -1,8 +1,8 @@
 {
-  "note": "The shape production returned when this was recorded: path, JSON type and value format, never a value. Committed, so every run of `go run ./internal/devtools smoke-live` is held against the same recording — any path added or removed, and any token that changed, fails there. Rewrite it with `go run ./internal/devtools baseline-record` only when production has moved and the move is intended. These shapes were transcribed from the Node.js SDK's recording of the same production responses (SDK 1.0.6, 2026-08-31) rather than recorded from Go; a signature describes the API, not the client, so the two agree — but the first Go recording made against production replaces this wholesale.",
+  "note": "The shape production returned when this was recorded: path, JSON type and value format, never a value. Committed, so every run of `smoke-live` is held against the same recording — any path added or removed, and any token that changed, fails there. Rewrite it with the `baseline-record` dev tool only when production has moved and the move is intended. These shapes were transcribed from the Node.js SDK's recording of the same production responses (SDK 1.0.6, 2026-08-31) rather than recorded from Java; a signature describes the API, not the client, so the two agree — but the first Java recording made against production replaces this wholesale.",
   "recordedAt": "2026-08-31T15:42:51.231Z",
   "baseUrl": "https://entities.pactman.org",
-  "sdkVersion": "1.0.6",
+  "sdkVersion": "1.0.0",
   "single": {
     "signature": {
       "code": "number",

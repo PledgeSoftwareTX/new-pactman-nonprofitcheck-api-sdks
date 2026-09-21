@@ -163,6 +163,18 @@ class TestDefaultHeaders:
 
         assert mock.requests[0].headers["authorization"] == f"Bearer {TEST_API_KEY}"
 
+    def test_a_differently_cased_header_cannot_ride_alongside_the_owned_ones(self) -> None:
+        mock = TransportMock([Stub(body=envelope([]))])
+        client = client_with(
+            mock, default_headers={"authorization": "Bearer attacker", "accept": "text/plain"}
+        )
+        client.nonprofits.check_bulk(["411787097"], headers={"content-type": "text/plain"})
+
+        headers = mock.requests[0].headers
+        assert headers.get_list("authorization") == [f"Bearer {TEST_API_KEY}"]
+        assert headers.get_list("accept") == ["application/json"]
+        assert headers.get_list("content-type") == ["application/json"]
+
 
 class TestUserAgent:
     def test_identifies_the_sdk_language_and_version(self) -> None:

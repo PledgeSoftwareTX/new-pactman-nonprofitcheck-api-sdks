@@ -1,6 +1,8 @@
 package org.pactman.nonprofitcheckplus.devtools;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Map;
 
@@ -43,6 +45,9 @@ public final class Tools {
                     throw new IllegalStateException("The live smoke check reported failures.");
                 }
                 break;
+            case "baseline-record":
+                recordBaseline(rest);
+                break;
             default:
                 help();
         }
@@ -53,11 +58,38 @@ public final class Tools {
         System.out.println();
         System.out.println("  mock         run the stand-in API until interrupted");
         System.out.println("  contract     print the signature this package predicts");
-        System.out.println("  smoke-live   check a live deployment against the contract");
+        System.out.println("  smoke-live       check a live deployment against the contract and"
+                + " the committed recording");
+        System.out.println("  baseline-record  rewrite the committed recording from a live deployment");
         System.out.println();
         System.out.println("  mvn -q -pl devtools exec:java -Dexec.args=\"mock\"");
         System.out.println("  PACTMAN_API_KEY=... mvn -q -pl devtools exec:java \\");
-        System.out.println("      -Dexec.args=\"smoke-live --baseline baseline.json\"");
+        System.out.println("      -Dexec.args=\"smoke-live\"");
+    }
+
+    /**
+     * Rewrites the committed baseline. Run from the {@code java/} directory, which is
+     * where {@code mvn -pl devtools exec:java} runs.
+     *
+     * @param rest options passed through to {@link SmokeLive#run}.
+     * @throws IOException when the recording cannot be written.
+     */
+    private static void recordBaseline(String[] rest) throws IOException {
+        Path target = Path.of(ContractResources.BASELINE_SOURCE);
+
+        if (!Files.isDirectory(target.getParent())) {
+            throw new IllegalStateException(
+                    "Run baseline-record from the java/ directory; " + target + " is not there.");
+        }
+
+        String[] args = Arrays.copyOf(rest, rest.length + 2);
+        args[rest.length] = "--record";
+        args[rest.length + 1] = target.toString();
+
+        if (SmokeLive.run(args) != 0) {
+            throw new IllegalStateException(
+                    "The live responses break the contract; fix that before recording them.");
+        }
     }
 
     private static void mock() throws IOException {

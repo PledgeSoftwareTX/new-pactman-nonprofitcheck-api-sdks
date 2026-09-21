@@ -452,6 +452,19 @@ go run ./internal/devtools mock 4010   # the fixture API, for pointing your own 
 
 `internal/contract/response-contract.json` is what this package promises each response looks like. It is a byte-identical copy of the Node SDK's `nodejs/src/response-contract.json` — the source of truth — and a test fails when the two differ, or when the Go models stop declaring exactly the fields it predicts. `internal/mockapi` is a port of the Node SDK's fixture server.
 
+### Checking a live deployment
+
+`smoke-live` holds a real deployment against that contract, and against `internal/contract/response-baseline.json` — the committed recording of what production returned. It fails on a value the contract permits no form of, a field either side does not know about, or a shape that moved since the recording; nullability and paths under a null parent are excused, because a recording is one organization on one afternoon.
+
+```bash
+go run ./internal/devtools contract                                   # the signature this package predicts
+PACTMAN_API_KEY=... go run ./internal/devtools smoke-live             # contract and recording
+PACTMAN_API_KEY=... go run ./internal/devtools smoke-live -ein 41-1787097 -baseline other.json
+PACTMAN_API_KEY=... go run ./internal/devtools baseline-record        # production moved on purpose
+```
+
+Both spend real quota against a real key, so neither runs in CI. Set `PACTMAN_BASE_URL` to point them at anything but production.
+
 ## Versioning and releases
 
 The module path is `github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks/go`, and Go reads a module's version from its git tag. Because the module lives in the `go/` directory, a release is tagged with that prefix:

@@ -224,7 +224,7 @@ class TestRateLimiting:
         assert seconds is not None
         assert seconds > 0
 
-    @pytest.mark.parametrize("value", ["not-a-date", "", "   "])
+    @pytest.mark.parametrize("value", ["not-a-date", "", "   ", "inf", "Infinity", "nan", "1e400"])
     def test_ignores_an_unparseable_retry_after(self, value: str) -> None:
         assert read_retry_after(httpx.Headers({"retry-after": value})) is None
 

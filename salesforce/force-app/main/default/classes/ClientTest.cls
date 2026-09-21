@@ -149,6 +149,24 @@ private class ClientTest {
     }
 
     @IsTest
+    static void callerHeadersCannotMisdeclareWhatTheSdkSendsOrAccepts() {
+        RecordingMock mock = new RecordingMock(new FixtureMock().withOrganization('411787097'));
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Test.startTest();
+        new Client(config().withHeader('accept', 'text/plain'))
+            .nonprofits.checkBulk(
+                new List<String>{ '411787097' },
+                new RequestOptions().withHeader('User-Agent', 'someone-else').withHeader('content-type', 'text/plain')
+            );
+        Test.stopTest();
+
+        Assert.areEqual('application/json', mock.lastRequest.getHeader('Accept'));
+        Assert.areEqual(SdkVersion.userAgent(), mock.lastRequest.getHeader('User-Agent'));
+        Assert.areEqual('application/json', mock.lastRequest.getHeader('Content-Type'));
+    }
+
+    @IsTest
     static void aRateLimitCarriesRetryAfter() {
         Test.setMock(
             HttpCalloutMock.class,

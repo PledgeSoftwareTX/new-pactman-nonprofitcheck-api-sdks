@@ -102,4 +102,91 @@ private class TransportTest {
 
         Assert.areEqual('corr-9', result.requestId);
     }
+
+    @IsTest
+    static void anApiErrorPrefersTheReasonsFromTheErrorsArray() {
+        Test.setMock(
+            HttpCalloutMock.class,
+            new FixtureMock().withStatus(400).withBody(
+                '{"code":400,"message":"Bad Request","errors":[{"reason":"EIN 12 is malformed."},{"reason":"Try again."}]}'
+            )
+        );
+
+        Test.startTest();
+        try {
+            new Client(config()).nonprofits.check('411787097');
+            Assert.fail('Expected a BadRequestException.');
+        } catch (BadRequestException e) {
+            Assert.areEqual('EIN 12 is malformed.; Try again.', e.getMessage());
+            Assert.areEqual('EIN 12 is malformed.; Try again.', e.apiMessage);
+        }
+        Test.stopTest();
+    }
+
+    @IsTest
+    static void anApiErrorFallsBackToTheEnvelopeMessageThenTheBodyText() {
+        List<ApiErrorDetail> none = new List<ApiErrorDetail>();
+        Map<String, Object> envelope = new Map<String, Object>{ 'message' => 'Bad Request' };
+
+        Assert.areEqual('Bad Request', Transport.apiMessageFor(envelope, none, envelope));
+        Assert.areEqual(
+            '<html>bad gateway</html>',
+            Transport.apiMessageFor(new Map<String, Object>(), none, '  <html>bad gateway</html>  ')
+        );
+        Assert.areEqual(
+            500,
+            Transport.apiMessageFor(new Map<String, Object>(), none, 'x'.repeat(600)).length(),
+            'A body that is not JSON is kept as evidence, but only its first 500 characters.'
+        );
+        Assert.isNull(Transport.apiMessageFor(new Map<String, Object>(), none, null));
+    }
+
+    @IsTest
+    static void aNonJsonErrorBodyBecomesTheMessage() {
+        Test.setMock(HttpCalloutMock.class, new FixtureMock().withStatus(502).withBody('<html>bad gateway</html>'));
+
+        Test.startTest();
+        try {
+            new Client(config()).nonprofits.check('411787097');
+            Assert.fail('Expected a ServerException.');
+        } catch (ServerException e) {
+            Assert.areEqual('<html>bad gateway</html>', e.getMessage());
+        }
+        Test.stopTest();
+    }
+
+    @IsTest
+    static void aCalloutWithNoResponseIsRetriedOnceForASingleOrABulkCheck() {
+        FlakyMock mock = new FlakyMock(new FixtureMock().withOrganization('411787097'));
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        Test.startTest();
+        SingleCheckResult single = new Client(config()).nonprofits.check('411787097');
+        BulkCheckResult bulk = new Client(config()).nonprofits.checkBulk(new List<String>{ '411787097' });
+        Test.stopTest();
+
+        Assert.isNotNull(single.nonprofit);
+        Assert.areEqual(1, bulk.organizations.size());
+        Assert.areEqual(4, mock.calls, 'Each call lost its first response and succeeded on the immediate retry.');
+    }
+
+    /** Loses every other response, as a dropped connection would. */
+    private class FlakyMock implements HttpCalloutMock {
+        private final FixtureMock inner;
+        public Integer calls = 0;
+
+        private FlakyMock(FixtureMock inner) {
+            this.inner = inner;
+        }
+
+        public HttpResponse respond(HttpRequest request) {
+            calls++;
+
+            if (Math.mod(calls, 2) == 1) {
+                throw new CalloutException('Unexpected end of file from server');
+            }
+
+            return inner.respond(request);
+        }
+    }
 }

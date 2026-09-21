@@ -30,6 +30,20 @@ public class BulkTests
     }
 
     [Fact]
+    public async Task ACallerSuppliedContentTypeCannotMisdeclareThePayload()
+    {
+        var handler = FakeHandler.Always(Stub.Json(Fixtures.Envelope(new JsonArray())));
+        using var client = Fixtures.Client(handler);
+
+        var options = new BulkRequestOptions();
+        options.Headers["content-type"] = "text/plain";
+
+        await client.Nonprofits.CheckBulkAsync(new[] { "411787097" }, options);
+
+        Assert.Equal("application/json; charset=utf-8", handler.LastRequest.Header("Content-Type"));
+    }
+
+    [Fact]
     public async Task DuplicatesAreSentAsSuppliedByDefault()
     {
         var handler = FakeHandler.Always(Stub.Json(Fixtures.Envelope(new JsonArray())));

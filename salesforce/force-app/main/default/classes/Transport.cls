@@ -9,9 +9,9 @@
  * pretend otherwise:
  *
  * - A callout that returns **no response at all** is retried once, immediately,
- *   and only for `GET`. A `POST` is never retried: the bulk endpoint bills per
- *   EIN, and a request that was received but whose response was lost would be
- *   charged twice.
+ *   for a single check and a bulk check alike — the other SDKs retry a transport
+ *   failure on either endpoint, and one immediate attempt is as close as Apex
+ *   can come without a sleep.
  * - A **timeout** is never retried. It has already consumed its share of the
  *   transaction's 120-second cumulative callout budget.
  * - An **HTTP error**, including 429 and 503, is never retried in-transaction.
@@ -22,7 +22,7 @@
  * Package-internal.
  */
 public class Transport {
-    /** Attempts after the first, for a GET that produced no response. */
+    /** Attempts after the first, for a callout that produced no response. */
     private static final Integer MAX_IMMEDIATE_RETRIES = 1;
 
     private final Config config;
@@ -53,9 +53,7 @@ public class Transport {
                     );
                 }
 
-                Boolean canRetry = method == 'GET' && attempts <= MAX_IMMEDIATE_RETRIES;
-
-                if (!canRetry) {
+                if (attempts > MAX_IMMEDIATE_RETRIES) {
                     throw Errors.network(
                         'The callout to the Pactman API produced no response: ' + e.getMessage(),
                         attempts
@@ -110,22 +108,28 @@ public class Transport {
         request.setEndpoint(config.resolvedEndpoint() + path);
         request.setMethod(method);
         request.setTimeout(resolveTimeout(options));
-        request.setHeader('Accept', 'application/json');
-        request.setHeader('User-Agent', SdkVersion.userAgent());
 
-        Map<String, String> defaults = config.headers();
-
-        for (String name : defaults.keySet()) {
-            request.setHeader(name, defaults.get(name));
-        }
+        Map<String, String> callerHeaders = config.headers();
 
         if (options != null) {
-            Map<String, String> perRequest = options.headerMap();
-
-            for (String name : perRequest.keySet()) {
-                request.setHeader(name, perRequest.get(name));
-            }
+            callerHeaders.putAll(options.headerMap());
         }
+
+        // Set last, and a caller's spelling of the same name skipped, so neither
+        // the client defaults nor a per-request header can misdeclare what this
+        // SDK sends or accepts.
+        for (String name : callerHeaders.keySet()) {
+            String lower = name.toLowerCase();
+
+            if (lower == 'accept' || lower == 'user-agent' || (body != null && lower == 'content-type')) {
+                continue;
+            }
+
+            request.setHeader(name, callerHeaders.get(name));
+        }
+
+        request.setHeader('Accept', 'application/json');
+        request.setHeader('User-Agent', SdkVersion.userAgent());
 
         if (body != null) {
             request.setHeader('Content-Type', 'application/json');
@@ -197,17 +201,46 @@ public class Transport {
 
         ApiErrorInit details = new ApiErrorInit();
         details.status = parsed.status;
-        details.apiMessage = envelope.get('message') instanceof String
-            ? (String) envelope.get('message')
-            : null;
-        details.apiCode = DataObject.asInteger(envelope.get('code'));
         details.apiErrors = normalizeApiErrors(envelope.get('errors'));
+        details.apiMessage = apiMessageFor(envelope, details.apiErrors, parsed.raw);
+        details.apiCode = DataObject.asInteger(envelope.get('code'));
         details.requestId = parsed.requestId;
         details.retryAfterSeconds = parsed.retryAfterSeconds;
         details.raw = parsed.raw;
         details.attempts = attempts;
 
         return Errors.fromStatus(details);
+    }
+
+    /**
+     * The message an API error carries, chosen as every SDK chooses it: the
+     * `reason` of each entry in `errors`, joined; else the envelope's `message`;
+     * else the first 500 characters of a body that was not JSON. `null` sends
+     * {@link Errors#fromStatus} to its default for the status.
+     */
+    @TestVisible
+    private static String apiMessageFor(Map<String, Object> envelope, List<ApiErrorDetail> apiErrors, Object raw) {
+        List<String> reasons = new List<String>();
+
+        for (ApiErrorDetail detail : apiErrors) {
+            if (String.isNotBlank(detail.reason)) {
+                reasons.add(detail.reason);
+            }
+        }
+
+        if (!reasons.isEmpty()) {
+            return String.join(reasons, '; ');
+        }
+
+        if (envelope.get('message') instanceof String) {
+            return (String) envelope.get('message');
+        }
+
+        if (raw instanceof String && String.isNotBlank((String) raw)) {
+            return ((String) raw).trim().left(500);
+        }
+
+        return null;
     }
 
     private static final Map<String, Integer> MONTHS = new Map<String, Integer>{

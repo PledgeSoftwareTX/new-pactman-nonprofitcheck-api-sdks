@@ -354,7 +354,8 @@ public final class Transport {
         try {
             double seconds = Double.parseDouble(trimmed);
 
-            if (seconds >= 0) {
+            // "Infinity" and "1e400" parse, and no wait can honour either.
+            if (Double.isFinite(seconds) && seconds >= 0) {
                 return seconds;
             }
 

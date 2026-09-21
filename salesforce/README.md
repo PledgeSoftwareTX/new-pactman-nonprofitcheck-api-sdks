@@ -168,10 +168,9 @@ admin-managed store, so the key lives there and Apex never sees it.
 
 **No exponential backoff.** Apex has no sleep primitive, and a busy-wait loop
 burns the 10-second synchronous CPU limit and takes the transaction down. So:
-a `GET` that returns no response at all is retried once, immediately; a `POST`
-is never retried, because the bulk endpoint bills per EIN and a lost response
-would be charged twice; timeouts and HTTP errors are never retried
-in-transaction. `Retry-After` is surfaced on the exception, and
+a callout that returns no response at all is retried once, immediately, for a
+single check and a bulk check alike, as the other SDKs retry a transport failure
+on either endpoint; timeouts and HTTP errors are never retried in-transaction. `Retry-After` is surfaced on the exception, and
 `CheckQueueable` is where real backoff happens.
 
 **No client-side rate limiter.** `maxRequestsPerSecond` in the other SDKs is

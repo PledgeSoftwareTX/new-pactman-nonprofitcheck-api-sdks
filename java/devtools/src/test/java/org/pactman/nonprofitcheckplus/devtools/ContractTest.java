@@ -349,6 +349,31 @@ class ContractTest {
     }
 
     @Test
+    @DisplayName("the committed recording reads, and describes only paths the contract predicts")
+    void theCommittedBaselineReads() {
+        Map<String, Object> contract = ContractResources.contract();
+        Map<String, Object> baseline = ContractResources.baseline();
+
+        for (Contract.Kind kind : Contract.Kind.values()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> entry = (Map<String, Object>) baseline.get(
+                    kind.name().toLowerCase(java.util.Locale.ROOT));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> recorded = (Map<String, Object>) entry.get("signature");
+            Map<String, String> signature = new LinkedHashMap<>();
+            recorded.forEach((path, token) -> signature.put(path, String.valueOf(token)));
+
+            Difference coverage = Contract.coverageDiff(
+                    Contract.composeExpected(contract, kind),
+                    signature,
+                    Contract.requiredPathsOf(contract, kind));
+
+            assertFalse(signature.isEmpty(), kind + " has no recorded paths");
+            assertTrue(coverage.clean(), kind + ": " + Contract.summarize(coverage.changes()));
+        }
+    }
+
+    @Test
     @DisplayName("the fixture API answers with a shape the contract permits")
     void theFixtureApiMatchesTheContract() throws Exception {
         // The stand-in API is what every example and the smoke runner exercise.

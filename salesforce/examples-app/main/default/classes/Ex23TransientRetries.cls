@@ -1,13 +1,12 @@
 /**
  * EX-23 — What gets retried, and what never does.
  *
- * The other Pactman SDKs retry transient 5xx with jittered backoff. Apex cannot
- * sleep, so this SDK retries exactly one thing: a `GET` that produced no
- * response at all, once, immediately.
+ * The other Pactman SDKs retry transient failures with jittered backoff, on a
+ * single check and a bulk check alike. Apex cannot sleep, so this SDK retries
+ * exactly one thing: a callout that produced no response at all, once,
+ * immediately — for either endpoint.
  *
- * Everything else is surfaced. A `POST` is never retried, because the bulk
- * endpoint bills per EIN and a request that was received but whose response was
- * lost would be charged twice.
+ * Everything else is surfaced.
  */
 @IsTest
 private class Ex23TransientRetries {
@@ -23,7 +22,7 @@ private class Ex23TransientRetries {
     }
 
     @IsTest
-    static void retriesALostGetOnceAndNeverAPost() {
+    static void retriesALostResponseOnceForEitherEndpoint() {
         ExampleOutput.heading('A GET with no response is retried once');
 
         LostResponseMock lostGet = new LostResponseMock();
@@ -47,7 +46,7 @@ private class Ex23TransientRetries {
             Assert.areEqual(2, lostGet.attempts);
         }
 
-        ExampleOutput.heading('A POST is never retried');
+        ExampleOutput.heading('A POST with no response is retried once too');
 
         LostResponseMock lostPost = new LostResponseMock();
         Test.setMock(HttpCalloutMock.class, lostPost);
@@ -60,12 +59,8 @@ private class Ex23TransientRetries {
             ExampleOutput.field('attempts', e.attempts);
             ExampleOutput.field('callouts made', lostPost.attempts);
 
-            Assert.areEqual(
-                1,
-                e.attempts,
-                'The bulk endpoint bills per EIN; a lost response must not be charged twice.'
-            );
-            Assert.areEqual(1, lostPost.attempts);
+            Assert.areEqual(2, e.attempts, 'One attempt, then one immediate retry, as for a GET.');
+            Assert.areEqual(2, lostPost.attempts);
         }
 
         ExampleOutput.heading('An HTTP error is never retried');
@@ -88,12 +83,11 @@ private class Ex23TransientRetries {
         Test.stopTest();
 
         ExampleOutput.note(
-            'Retried: a GET that produced no HTTP response, once, immediately.\n' +
-            'Never retried: a POST, a timeout, and every HTTP status including 429 and 503.\n\n' +
-            'The reasons are quota and the transaction. A POST that was received but whose\n' +
-            'response was lost has already been billed. A timeout has already spent its\n' +
-            'share of the 120-second cumulative callout budget. And an HTTP error cannot be\n' +
-            'waited out without sleep.\n\n' +
+            'Retried: a callout that produced no HTTP response, once, immediately.\n' +
+            'Never retried: a timeout, and every HTTP status including 429 and 503.\n\n' +
+            'The reason is the transaction. A timeout has already spent its share of the\n' +
+            '120-second cumulative callout budget, and an HTTP error cannot be waited out\n' +
+            'without sleep.\n\n' +
             'What you get instead is Retry-After on the exception and CheckQueueable to\n' +
             'act on it. That is a real, working backoff - it is just asynchronous, which\n' +
             'is the only kind Apex has.'

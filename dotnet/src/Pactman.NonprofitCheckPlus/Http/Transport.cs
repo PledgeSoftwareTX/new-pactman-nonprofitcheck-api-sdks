@@ -477,6 +477,11 @@ namespace Pactman.NonprofitCheckPlus.Http
             headers["User-Agent"] = _config.UserAgent;
             headers["Authorization"] = _credential();
 
+            if (payload != null)
+            {
+                headers["Content-Type"] = "application/json; charset=utf-8";
+            }
+
             foreach (var header in headers)
             {
                 if (request.Headers.TryAddWithoutValidation(header.Key, header.Value))
