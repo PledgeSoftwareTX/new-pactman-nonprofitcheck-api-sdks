@@ -30,7 +30,14 @@
     </developer>
   </developers>
 
-  <scm>
+  <!--
+    Without these attributes Maven appends each child's artifactId to the
+    inherited URLs, and the POM published with the jar would point at
+    `...sdks.git/pactman-nonprofit-check-plus`, which does not exist.
+  -->
+  <scm child.scm.connection.inherit.append.path="false"
+       child.scm.developerConnection.inherit.append.path="false"
+       child.scm.url.inherit.append.path="false">
     <connection>scm:git:https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git</connection>
     <developerConnection>scm:git:git@github.com:PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks.git</developerConnection>
     <url>https://github.com/PledgeSoftwareTX/new-pactman-nonprofitcheck-api-sdks</url>
@@ -115,6 +122,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-gpg-plugin</artifactId>
           <version>3.2.4</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>flatten-maven-plugin</artifactId>
+          <version>1.7.3</version>
         </plugin>
         <plugin>
           <groupId>org.sonatype.central</groupId>

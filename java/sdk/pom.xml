@@ -65,6 +65,31 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
       </plugin>
+
+      <!--
+        The parent is a build aggregator and is never published, so the POM that
+        ships with the jar must not name it: a consumer resolving it from Central
+        would fail on the missing parent. Flattening inlines what the parent
+        contributes and drops the reference. It runs in every build, not only the
+        release profile, so the POM `install` puts in the local repository is the
+        same one `deploy` sends to Central.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration>
+          <!-- Keeps the name, url, licenses, developers and scm Central requires. -->
+          <flattenMode>ossrh</flattenMode>
+          <outputDirectory>${project.build.directory}</outputDirectory>
+        </configuration>
+        <executions>
+          <execution>
+            <id>flatten</id>
+            <phase>process-resources</phase>
+            <goals><goal>flatten</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 
