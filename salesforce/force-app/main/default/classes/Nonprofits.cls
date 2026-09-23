@@ -1,10 +1,10 @@
 /** Nonprofit lookups. Reached through {@link Client.nonprofits}. */
 global class Nonprofits {
-    private final Transport transport;
+    private final Transport sender;
 
     /** Package-internal: built by {@link Client}. */
-    public Nonprofits(Transport transport) {
-        this.transport = transport;
+    public Nonprofits(Transport sender) {
+        this.sender = sender;
     }
 
     /**
@@ -21,18 +21,18 @@ global class Nonprofits {
      * @throws ValidationException if the EIN is malformed. Nothing is sent.
      * @throws PactmanException for any other failure.
      */
-    global SingleCheckResult check(String ein) {
-        return check(ein, null);
+    global SingleCheckResult check(String einValue) {
+        return check(einValue, null);
     }
 
     /** Checks a single nonprofit by EIN, with per-request overrides. */
-    global SingleCheckResult check(String ein, RequestOptions options) {
+    global SingleCheckResult check(String einValue, RequestOptions options) {
         String path = Constants.SINGLE_CHECK_PATH.replace(
             '{ein}',
-            EncodingUtil.urlEncode(Ein.normalize(ein), 'UTF-8')
+            EncodingUtil.urlEncode(Ein.normalize(einValue), 'UTF-8')
         );
 
-        TransportResponse response = transport.send('GET', path, null, options);
+        TransportResponse response = sender.send('GET', path, null, options);
         Map<String, Object> envelope = response.envelopeOrEmpty();
 
         return new SingleCheckResult(
@@ -76,7 +76,7 @@ global class Nonprofits {
     global BulkCheckResult checkBulk(List<String> eins, RequestOptions options) {
         List<String> payload = buildPayload(eins, options != null && options.dedupe == true);
 
-        TransportResponse response = transport.send('POST', Constants.BULK_CHECK_PATH, payload, options);
+        TransportResponse response = sender.send('POST', Constants.BULK_CHECK_PATH, payload, options);
         Map<String, Object> envelope = response.envelopeOrEmpty();
         List<ApiErrorDetail> errors = Transport.normalizeApiErrors(envelope.get('errors'));
 

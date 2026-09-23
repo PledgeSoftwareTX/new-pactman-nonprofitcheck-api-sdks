@@ -11,15 +11,15 @@ private class Quickstart {
     static void checksOneNonprofit() {
         Test.setMock(HttpCalloutMock.class, new ExampleApiMock());
 
-        String ein = '41-1787097';
+        String einValue = '41-1787097';
 
         Test.startTest();
-        SingleCheckResult result = ExampleApiMock.client().nonprofits.check(ein);
+        SingleCheckResult result = ExampleApiMock.client().nonprofits.check(einValue);
         Test.stopTest();
 
         if (result.nonprofit == null) {
-            ExampleOutput.note('No record for EIN ' + ein + '.');
-            Assert.fail('The fixture API holds a record for ' + ein + '.');
+            ExampleOutput.note('No record for EIN ' + einValue + '.');
+            Assert.fail('The fixture API holds a record for ' + einValue + '.');
         }
 
         Nonprofit nonprofit = result.nonprofit;
@@ -50,7 +50,7 @@ private class Quickstart {
         ExampleOutput.heading('OFAC');
         ExampleOutput.bullet(ofac == null ? 'not returned' : ofac.status);
 
-        Assert.areEqual(Ein.normalize(ein), nonprofit.ein);
+        Assert.areEqual(Ein.normalize(einValue), nonprofit.ein);
         Assert.isNotNull(pub78, 'The fixture record carries Publication 78 findings.');
 
         // A syntactically valid EIN and a clean set of findings are not an

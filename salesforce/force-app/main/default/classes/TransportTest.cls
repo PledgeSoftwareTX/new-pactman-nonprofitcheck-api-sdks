@@ -162,21 +162,21 @@ private class TransportTest {
 
         Test.startTest();
         SingleCheckResult single = new Client(config()).nonprofits.check('411787097');
-        BulkCheckResult bulk = new Client(config()).nonprofits.checkBulk(new List<String>{ '411787097' });
+        BulkCheckResult bulkResult = new Client(config()).nonprofits.checkBulk(new List<String>{ '411787097' });
         Test.stopTest();
 
         Assert.isNotNull(single.nonprofit);
-        Assert.areEqual(1, bulk.organizations.size());
+        Assert.areEqual(1, bulkResult.organizations.size());
         Assert.areEqual(4, mock.calls, 'Each call lost its first response and succeeded on the immediate retry.');
     }
 
     /** Loses every other response, as a dropped connection would. */
     private class FlakyMock implements HttpCalloutMock {
-        private final FixtureMock inner;
+        private final FixtureMock delegate;
         public Integer calls = 0;
 
-        private FlakyMock(FixtureMock inner) {
-            this.inner = inner;
+        private FlakyMock(FixtureMock delegate) {
+            this.delegate = delegate;
         }
 
         public HttpResponse respond(HttpRequest request) {
@@ -186,7 +186,7 @@ private class TransportTest {
                 throw new CalloutException('Unexpected end of file from server');
             }
 
-            return inner.respond(request);
+            return delegate.respond(request);
         }
     }
 }

@@ -57,14 +57,14 @@ public class ExampleApiMock implements HttpCalloutMock {
         return organizations.get(ein);
     }
 
-    public HttpResponse respond(HttpRequest request) {
+    public HttpResponse respond(HttpRequest req) {
         requests++;
 
-        if (request.getEndpoint().contains(BULK_MARKER)) {
-            return bulk(request);
+        if (req.getEndpoint().contains(BULK_MARKER)) {
+            return bulkResponse(req);
         }
 
-        return single(request.getEndpoint().substringAfterLast('/'));
+        return single(req.getEndpoint().substringAfterLast('/'));
     }
 
     private HttpResponse single(String ein) {
@@ -120,11 +120,11 @@ public class ExampleApiMock implements HttpCalloutMock {
         );
     }
 
-    private HttpResponse bulk(HttpRequest request) {
+    private HttpResponse bulkResponse(HttpRequest req) {
         List<Object> requested;
 
         try {
-            requested = (List<Object>) JSON.deserializeUntyped(request.getBody());
+            requested = (List<Object>) JSON.deserializeUntyped(req.getBody());
         } catch (Exception malformed) {
             return failure(
                 400,

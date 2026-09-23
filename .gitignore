@@ -44,3 +44,9 @@ ruby/vendor/
 ruby/pkg/
 ruby/Gemfile.lock
 *.gem
+
+# Salesforce
+.sf/
+.sfdx/
+.localdevserver/
+deploy-options.json

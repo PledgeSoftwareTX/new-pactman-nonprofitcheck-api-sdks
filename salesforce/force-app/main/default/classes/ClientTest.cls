@@ -215,18 +215,18 @@ private class ClientTest {
 
     /** Captures what was actually sent, then delegates to the packaged fixture. */
     private class RecordingMock implements HttpCalloutMock {
-        private final FixtureMock inner;
+        private final FixtureMock delegate;
         public HttpRequest lastRequest;
         public String lastBody;
 
-        private RecordingMock(FixtureMock inner) {
-            this.inner = inner;
+        private RecordingMock(FixtureMock delegate) {
+            this.delegate = delegate;
         }
 
         public HttpResponse respond(HttpRequest request) {
             lastRequest = request;
             lastBody = request.getBody();
-            return inner.respond(request);
+            return delegate.respond(request);
         }
     }
 

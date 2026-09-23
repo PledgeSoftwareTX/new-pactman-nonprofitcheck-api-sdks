@@ -4,7 +4,7 @@
  * Thrown directly when the status maps to no more specific subclass. Response
  * metadata is preserved even when the body could not be parsed as JSON.
  */
-global class ApiException extends PactmanException {
+global virtual class ApiException extends PactmanException {
     /** HTTP status of the response. */
     global Integer status { get; private set; }
 

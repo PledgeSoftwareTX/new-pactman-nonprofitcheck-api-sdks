@@ -13,7 +13,7 @@
  * built through {@link Errors} and populated with the package-internal `init`
  * methods below. Subscribers construct none of them.
  */
-global class PactmanException extends Exception {
+global virtual class PactmanException extends Exception {
     /** The stable category for this failure. */
     global ErrorCategory category { get; private set; }
 

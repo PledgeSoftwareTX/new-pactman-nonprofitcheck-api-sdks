@@ -266,13 +266,13 @@ public class Transport {
             return Decimal.valueOf(trimmed);
         }
 
-        Datetime when = parseHttpDate(trimmed);
+        Datetime expiresAt = parseHttpDate(trimmed);
 
-        if (when == null) {
+        if (expiresAt == null) {
             return null;
         }
 
-        Decimal seconds = Decimal.valueOf(when.getTime() - Datetime.now().getTime()) / 1000;
+        Decimal seconds = Decimal.valueOf(expiresAt.getTime() - Datetime.now().getTime()) / 1000;
         return seconds < 0 ? 0 : seconds;
     }
 
@@ -286,9 +286,9 @@ public class Transport {
             }
 
             Integer month = MONTHS.get(parts[2].capitalize());
-            List<String> time = parts[4].split(':');
+            List<String> clockParts = parts[4].split(':');
 
-            if (month == null || time.size() < 3) {
+            if (month == null || clockParts.size() < 3) {
                 return null;
             }
 
@@ -296,9 +296,9 @@ public class Transport {
                 Integer.valueOf(parts[3]),
                 month,
                 Integer.valueOf(parts[1]),
-                Integer.valueOf(time[0]),
-                Integer.valueOf(time[1]),
-                Integer.valueOf(time[2])
+                Integer.valueOf(clockParts[0]),
+                Integer.valueOf(clockParts[1]),
+                Integer.valueOf(clockParts[2])
             );
         } catch (Exception e) {
             return null;

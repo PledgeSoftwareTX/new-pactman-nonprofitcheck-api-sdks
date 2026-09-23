@@ -11,20 +11,20 @@ private class Ex16NotFound {
     static void reportsAMissAsNotFound() {
         Test.setMock(HttpCalloutMock.class, new ExampleApiMock());
 
-        String ein = ExampleFixtures.NO_RECORD;
+        String einValue = ExampleFixtures.NO_RECORD;
 
         ExampleOutput.heading('Locally, this EIN is fine');
-        ExampleOutput.field('Ein.isValid', Ein.isValid(ein));
-        ExampleOutput.field('Ein.normalize', Ein.normalize(ein));
+        ExampleOutput.field('Ein.isValid', Ein.isValid(einValue));
+        ExampleOutput.field('Ein.normalize', Ein.normalize(einValue));
 
-        Assert.isTrue(Ein.isValid(ein));
+        Assert.isTrue(Ein.isValid(einValue));
 
         Test.startTest();
 
         ExampleOutput.heading('The API has no record for it');
 
         try {
-            ExampleApiMock.client().nonprofits.check(ein);
+            ExampleApiMock.client().nonprofits.check(einValue);
             Assert.fail('Expected the lookup to report no record.');
         } catch (NotFoundException e) {
             ExampleOutput.field('exception', 'NotFoundException');

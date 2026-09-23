@@ -43,20 +43,20 @@ public class ExampleDates {
             return null;
         }
 
-        List<String> date = parts[0].split('/');
-        List<String> time = parts[1].split(':');
+        List<String> dateParts = parts[0].split('/');
+        List<String> clockParts = parts[1].split(':');
 
-        if (date.size() != 3 || time.size() != 3) {
+        if (dateParts.size() != 3 || clockParts.size() != 3) {
             return null;
         }
 
         try {
-            Integer month = Integer.valueOf(date[0]);
-            Integer day = Integer.valueOf(date[1]);
-            Integer year = Integer.valueOf(date[2]);
-            Integer hour = Integer.valueOf(time[0]);
-            Integer minute = Integer.valueOf(time[1]);
-            Integer second = Integer.valueOf(time[2]);
+            Integer month = Integer.valueOf(dateParts[0]);
+            Integer day = Integer.valueOf(dateParts[1]);
+            Integer year = Integer.valueOf(dateParts[2]);
+            Integer hour = Integer.valueOf(clockParts[0]);
+            Integer minute = Integer.valueOf(clockParts[1]);
+            Integer second = Integer.valueOf(clockParts[2]);
 
             if (parts.size() > 2) {
                 String meridiem = parts[2].toUpperCase();

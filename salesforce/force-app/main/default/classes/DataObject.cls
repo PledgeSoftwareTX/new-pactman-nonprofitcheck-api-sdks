@@ -79,8 +79,8 @@ global abstract class DataObject {
      * Package-internal, for reading the envelope's own numeric fields.
      */
     public static Integer asInteger(Object value) {
-        Decimal number = asDecimal(value);
-        return number == null ? null : number.intValue();
+        Decimal decimalValue = asDecimal(value);
+        return decimalValue == null ? null : decimalValue.intValue();
     }
 
     /** Coerces a decoded JSON number to a Decimal, or `null`. Package-internal. */

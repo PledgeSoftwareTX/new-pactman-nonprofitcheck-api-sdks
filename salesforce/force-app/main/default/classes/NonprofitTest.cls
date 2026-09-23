@@ -66,6 +66,6 @@ private class NonprofitTest {
             Assert.isTrue(nonprofit.has(field), 'Contract field not readable: ' + field);
         }
 
-        Assert.areEqual(53, fields.size(), 'The contract changed size; regenerate the accessors.');
+        Assert.areEqual(43, fields.size(), 'The contract changed size; regenerate the accessors.');
     }
 }

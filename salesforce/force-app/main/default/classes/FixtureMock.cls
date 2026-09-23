@@ -27,13 +27,13 @@ global class FixtureMock implements HttpCalloutMock {
     private Integer checkCount = 1;
 
     /** Seeds an EIN with a realistic record. */
-    global FixtureMock withOrganization(String ein) {
-        return withOrganization(ein, sampleOrganization(ein));
+    global FixtureMock withOrganization(String einValue) {
+        return withOrganization(einValue, sampleOrganization(einValue));
     }
 
     /** Seeds an EIN with fields of your choosing. */
-    global FixtureMock withOrganization(String ein, Map<String, Object> fields) {
-        organizations.put(Ein.normalize(ein), fields);
+    global FixtureMock withOrganization(String einValue, Map<String, Object> fields) {
+        organizations.put(Ein.normalize(einValue), fields);
         return this;
     }
 
@@ -73,8 +73,8 @@ global class FixtureMock implements HttpCalloutMock {
     }
 
     /** A realistic record for `ein`, for tests that do not care about specific values. */
-    global static Map<String, Object> sampleOrganization(String ein) {
-        String normalized = Ein.normalize(ein);
+    global static Map<String, Object> sampleOrganization(String einValue) {
+        String normalized = Ein.normalize(einValue);
 
         return new Map<String, Object>{
             'ein' => normalized,
