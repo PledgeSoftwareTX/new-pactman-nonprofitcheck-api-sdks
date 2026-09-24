@@ -51,7 +51,6 @@ public sealed class Ex10OfacScreening : IExample
             }
 
             Output.DisplayField(ofac, "status");
-            Output.DisplayField(ofac, "list_published_date");
 
             var status = ofac.Status;
 

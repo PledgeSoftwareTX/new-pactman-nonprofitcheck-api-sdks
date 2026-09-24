@@ -50,22 +50,17 @@ public sealed class Ex06BmfStatus : IExample
 
         Output.Heading("Status");
         Output.DisplayField(bmf, "status");
-        Output.DisplayField(bmf, "deductability_text");
         Output.DisplayField(bmf, "church_message");
 
         Output.Heading("Identity as the BMF records it");
         Output.DisplayField(bmf, "organization_name");
         Output.DisplayField(bmf, "ein");
-        Output.DisplayField(bmf, "street_address");
-        Output.DisplayField(bmf, "city");
-        Output.DisplayField(bmf, "state");
 
         Output.Heading("Exemption");
         Output.DisplayField(bmf, "subsection");
         Output.DisplayField(bmf, "subsection_description");
         Output.DisplayField(bmf, "exempt_status_code");
         Output.DisplayField(bmf, "filing_req_code");
-        Output.DisplayField(bmf, "pf_filing_req_cd");
         Output.DisplayField(bmf, "group_exemption");
 
         Output.Heading("Ruling and classification");
